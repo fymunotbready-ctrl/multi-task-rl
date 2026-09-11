@@ -8,10 +8,10 @@ env = BasketballEnv()
 model = PPO("MlpPolicy", env, verbose=1, learning_rate=3e-4,
             n_steps=1024, batch_size=64, seed=42)
 
-print("=== Training 30k steps (takes ~2 min on Colab) ===")
-model.learn(total_timesteps=30_000)
+print("=== Training 50k steps ===")
+model.learn(total_timesteps=50_000)
 model.save("basketball_ppo")
 
 mean_r, std_r = evaluate_policy(model, env, n_eval_episodes=100)
 print(f"\nFinal: avg reward {mean_r:.3f} +/- {std_r:.3f} over 100 shots")
-print("(1.0 = scores every time, ~-0.3 or better = decent)")
+print("(1.0 = scores every time, >0.5 = scores most shots)")

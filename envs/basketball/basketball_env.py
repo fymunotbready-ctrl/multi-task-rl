@@ -22,6 +22,7 @@ class BasketballEnv(gym.Env):
         self.vel = np.zeros(2, dtype=np.float64)
         self.launched = False
         self.steps = 0
+        self.min_dist = 999.0
         self.hoop = np.array(
             [6.0 + self.np_random.uniform(-1.5, 1.5), 3.0]
         )
@@ -50,6 +51,11 @@ class BasketballEnv(gym.Env):
         self.vel[1] -= G * DT
         self.ball += self.vel * DT
 
+        self.min_dist = min(
+            self.min_dist,
+            float(np.linalg.norm(self.ball - self.hoop))
+        )
+
         reward = -0.01
         scored = False
         if prev_x < self.hoop[0] <= self.ball[0]:
@@ -59,4 +65,8 @@ class BasketballEnv(gym.Env):
 
         terminated = scored or self.ball[1] < 0
         truncated = self.steps >= 200
+
+        if terminated and not scored:
+            reward += max(0.0, 0.6 - 0.15 * self.min_dist)
+
         return self._obs(), reward, terminated, truncated, {}
