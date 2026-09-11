@@ -56,7 +56,7 @@ class BasketballEnv(gym.Env):
             float(np.linalg.norm(self.ball - self.hoop))
         )
 
-        reward = -0.01
+        reward = -0.005
         scored = False
         if prev_x < self.hoop[0] <= self.ball[0]:
             if abs(self.ball[1] - self.hoop[1]) < 0.3:
@@ -67,6 +67,6 @@ class BasketballEnv(gym.Env):
         truncated = self.steps >= 200
 
         if terminated and not scored:
-            reward += max(0.0, 0.6 - 0.15 * self.min_dist)
+            reward += max(0.0, 0.8 - 0.2 * self.min_dist)
 
         return self._obs(), reward, terminated, truncated, {}
