@@ -4,7 +4,7 @@ import numpy as np
 
 G = 9.8
 DT = 0.05
-HIT_DIST = 0.4
+HIT_DIST = 0.5
 
 
 class AimingEnv(gym.Env):
@@ -47,7 +47,7 @@ class AimingEnv(gym.Env):
             self.vel = np.array([power * np.cos(rad), power * np.sin(rad)])
             self.fired = True
 
-        self.target += self.tvel * DT          # target keeps drifting
+        self.target += self.tvel * DT
         self.vel[1] -= G * DT
         self.ball += self.vel * DT
 
