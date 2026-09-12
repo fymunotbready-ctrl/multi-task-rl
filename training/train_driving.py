@@ -2,16 +2,22 @@ import sys
 sys.path.insert(0, ".")
 from envs.driving.driving_env import DrivingEnv
 from stable_baselines3 import PPO
-from stable_baselines3.common.evaluation import evaluate_policy
 
 env = DrivingEnv()
 model = PPO("MlpPolicy", env, verbose=1, learning_rate=3e-4,
             n_steps=1024, batch_size=64, seed=7)
+print("=== driving v3: 100k steps ===")
+model.learn(total_timesteps=100_000)
+model.save("models/driving_ppo")
 
-print("=== Training 50k steps ===")
-model.learn(total_timesteps=50_000)
-model.save("driving_ppo")
-
-mean_r, std_r = evaluate_policy(model, env, n_eval_episodes=100)
-print(f"\nFinal: avg reward {mean_r:.3f} +/- {std_r:.3f} over 100 episodes")
-print("(~1.0 = reaches target nearly every time)")
+reached = 0
+for i in range(100):
+    obs, _ = env.reset(seed=1000 + i)
+    done = False
+    while not done:
+        a, _ = model.predict(obs, deterministic=True)
+        obs, r, term, trunc, _ = env.step(a)
+        done = term or trunc
+    if term and r >= 0.99:
+        reached += 1
+print(f"\nDRIVING GATE: {reached}/100  (need >= 50, expect ~100)")

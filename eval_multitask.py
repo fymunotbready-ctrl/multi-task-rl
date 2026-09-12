@@ -1,32 +1,32 @@
 import sys
 sys.path.insert(0, ".")
 from stable_baselines3 import PPO
+from envs.meta_env import TASK_NAMES
 from envs.basketball.basketball_env import BasketballEnv
 from envs.driving.driving_env import DrivingEnv
 from envs.aiming.aiming_env import AimingEnv
-from envs.meta_env import add_task_id
+from shared.shared_trunk import encode_obs
+
+EVAL_ENVS = [BasketballEnv(), DrivingEnv(), AimingEnv()]
 
 
-def success_rate(model, env, idx, n=50, seed=999999):
+def task_success(model, env, idx, n=100):
     hits = 0
     for i in range(n):
-        obs, _ = env.reset(seed=seed + i)
-        obs = add_task_id(obs, idx)          # same 9-dim obs as training
+        obs, _ = env.reset(seed=999_000 + i)
+        obs = encode_obs(obs, idx)
         done = False
         while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, r, term, trunc, _ = env.step(action)
-            obs = add_task_id(obs, idx)
+            a, _ = model.predict(obs, deterministic=True)
+            obs, r, term, trunc, _ = env.step(a)
+            obs = encode_obs(obs, idx)
             done = term or trunc
-            if term and r >= 0.99:           # RAW reward (scaling is train-only)
-                hits += 1
+        if term and r >= 0.99:
+            hits += 1
     return hits / n
 
 
-model = PPO.load("models/multitask_ppo.zip")
-tasks = [(0, "basketball", BasketballEnv),
-         (1, "driving", DrivingEnv),
-         (2, "aiming", AimingEnv)]
-for idx, name, env_cls in tasks:
-    rate = success_rate(model, env_cls(), idx)
-    print(f"SHARED MODEL  {name:12s} success: {rate*100:5.1f}%")
+path = sys.argv[1] if len(sys.argv) > 1 else "models/joint_trunk_best.zip"
+model = PPO.load(path)
+for i, name in enumerate(TASK_NAMES):
+    print(f"JOINT  {name:12s} success: {task_success(model, EVAL_ENVS[i], i)*100:5.1f}%  ({path})")
