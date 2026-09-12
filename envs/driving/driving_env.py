@@ -42,18 +42,18 @@ class DrivingEnv(gym.Env):
         throttle = float(np.clip(action[1], -1, 1))
 
         self.speed += throttle * 2.0 * DT
-        self.speed -= 0.2 * self.speed * DT          # drag
+        self.speed -= 0.2 * self.speed * DT
         self.speed = float(np.clip(self.speed, 0.0, MAX_SPEED))
-        self.heading += steer * self.speed * 0.8 * DT  # no turning in place
+        self.heading += steer * self.speed * 0.8 * DT
         self.pos += np.array([np.cos(self.heading), np.sin(self.heading)]) * self.speed * DT
 
         dist = float(np.linalg.norm(self.target - self.pos))
-        reward = (self.prev_dist - dist) - 0.005   # progress minus time cost
+        reward = (self.prev_dist - dist) - 0.005
         self.prev_dist = dist
 
         reached = dist < REACH_DIST
         if reached:
-            reward = 1.0
+            reward = 5.0   # MUST beat any hover-farming strategy
 
         terminated = reached
         truncated = self.steps >= 300
