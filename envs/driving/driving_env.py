@@ -4,21 +4,26 @@ import numpy as np
 
 DT = 0.1
 MAX_SPEED = 5.0
-MIN_TURN_SPEED = 1.0
+MIN_TURN_SPEED = 1.0   # wheels steer even at a standstill -> gradient from step 0
 REACH_DIST = 0.5
 MAX_STEPS = 300
 
 
 class DrivingEnv(gym.Env):
-    """v3: sin/cos heading obs, steer authority at zero speed, stall penalty.
-    Fixes the verified failure: PPO collapsing to a standstill."""
+    """Kinematic point-car, v3.
+    Changes vs v2: sin/cos heading obs, relative target, steer authority at
+    zero speed, stall penalty. Verified failure mode it fixes: PPO collapsing
+    to a standstill (end speed ~0.1, episodes running to truncation)."""
 
     def __init__(self):
         super().__init__()
+        # [sin(h), cos(h), speed, target_x - pos_x, target_y - pos_y]
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32)
+            low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32
+        )
         self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+            low=-1.0, high=1.0, shape=(2,), dtype=np.float32
+        )
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -36,12 +41,15 @@ class DrivingEnv(gym.Env):
         rel = self.target - self.pos
         return np.array(
             [np.sin(self.heading), np.cos(self.heading),
-             self.speed, rel[0], rel[1]], dtype=np.float32)
+             self.speed, rel[0], rel[1]],
+            dtype=np.float32,
+        )
 
     def step(self, action):
         self.steps += 1
         steer = float(np.clip(action[0], -1, 1))
         throttle = float(np.clip(action[1], -1, 1))
+
         self.speed += throttle * 2.0 * DT
         self.speed -= 0.2 * self.speed * DT
         self.speed = float(np.clip(self.speed, 0.0, MAX_SPEED))
@@ -54,9 +62,11 @@ class DrivingEnv(gym.Env):
 
         reward = progress - 0.01
         if self.speed < 0.1:
-            reward -= 0.05
+            reward -= 0.05                    # stalling is strictly the worst option
+
         reached = dist < REACH_DIST
         if reached:
             reward = 5.0
-        return (self._obs(), float(reward), reached,
-                self.steps >= MAX_STEPS, {"success": bool(reached)})
+        terminated = reached
+        truncated = self.steps >= MAX_STEPS
+        return self._obs(), float(reward), terminated, truncated, {"success": bool(reached)}

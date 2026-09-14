@@ -1,18 +1,25 @@
-"""Shared-trunk model: per-task projection (obs->64) -> SHARED trunk
-64->64->64 -> per-task heads (SB3 heads with net_arch=[]).
-Routing: width 9 = joint (one-hot selects projection, per-sample);
-otherwise fixed single-task mode."""
-import numpy as np
+"""Shared-trunk multi-task model.
+
+Per-task input projection (obs -> 64) -> SHARED trunk MLP (64->64->64)
+-> per-task output heads (SB3 action_net/value_net with net_arch=[]).
+
+Transfer rule: only the trunk weights (+ banked projections) move between
+tasks. Each task's PPO instance owns fresh heads.
+"""
 import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 TRUNK_DIM = 64
-TASKS = {"basketball": 6, "driving": 5, "aiming": 6}
-TASK_NAMES = list(TASKS.keys())
-N_TASKS = len(TASK_NAMES)
-OBS_PAD = max(TASKS.values())
-JOINT_DIM = OBS_PAD + N_TASKS
+
+# Global registry: every model instance carries ALL projections, so a
+# checkpoint saved by task A loads into task B with strict=True and simply
+# banks A's projection weights alongside the trunk.
+TASKS = {
+    "basketball": 6,
+    "driving": 5,     # v3 env (sin/cos heading + relative target)
+    "aiming": 6,
+}
 
 
 class SharedTrunk(nn.Module):
@@ -21,50 +28,43 @@ class SharedTrunk(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(dim, dim), nn.Tanh(),
             nn.Linear(dim, dim), nn.Tanh(),
-            nn.Linear(dim, dim), nn.Tanh())
+            nn.Linear(dim, dim), nn.Tanh(),
+        )
 
     def forward(self, x):
         return self.net(x)
 
 
 class TrunkFeaturesExtractor(BaseFeaturesExtractor):
+    """SB3 hook: routes obs through the active task's projection, then the
+    shared trunk. Output features_dim=64 feeds the per-task heads."""
+
     def __init__(self, observation_space, tasks: dict, active_task: str):
         super().__init__(observation_space, TRUNK_DIM)
         self.tasks = dict(tasks)
         self.active_task = active_task
-        assert active_task in self.tasks
-        self.joint_dim = max(self.tasks.values()) + len(self.tasks)
         self.proj = nn.ModuleDict({
-            name: nn.Linear(dim, TRUNK_DIM) for name, dim in self.tasks.items()})
+            name: nn.Linear(dim, TRUNK_DIM) for name, dim in self.tasks.items()
+        })
         self.trunk = SharedTrunk()
 
     def forward(self, obs):
-        if obs.shape[-1] == self.joint_dim:
-            xs = obs[:, :OBS_PAD]
-            ids = obs[:, OBS_PAD:].argmax(dim=1)
-            out = torch.zeros(obs.shape[0], TRUNK_DIM, device=obs.device)
-            for i, name in enumerate(TASK_NAMES):
-                mask = ids == i
-                if mask.any():
-                    z = torch.tanh(self.proj[name](xs[mask, :self.tasks[name]]))
-                    out[mask] = self.trunk(z)
-            return out
-        return self.trunk(torch.tanh(self.proj[self.active_task](obs)))
+        z = torch.tanh(self.proj[self.active_task](obs))
+        return self.trunk(z)
 
-
-def encode_obs(obs, task_idx):
-    padded = np.zeros(OBS_PAD, dtype=np.float32)
-    padded[:len(obs)] = obs
-    onehot = np.zeros(N_TASKS, dtype=np.float32)
-    onehot[task_idx] = 1.0
-    return np.concatenate([padded, onehot])
+    def forward_task(self, obs, task: str):
+        """Hook for the future joint multi-task env (per-episode routing)."""
+        z = torch.tanh(self.proj[task](obs))
+        return self.trunk(z)
 
 
 def trunk_policy_kwargs(active_task: str) -> dict:
     return dict(
         features_extractor_class=TrunkFeaturesExtractor,
         features_extractor_kwargs=dict(tasks=TASKS, active_task=active_task),
-        net_arch=[], ortho_init=True)
+        net_arch=[],          # action_net/value_net become the per-task heads
+        ortho_init=True,
+    )
 
 
 def save_trunk(model, path: str):
