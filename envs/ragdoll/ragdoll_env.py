@@ -23,6 +23,7 @@ class RagdollEnv(gym.Env):
         render_mode=None,
         max_steps=1000,
         reference_motion=None,
+        reference_motions=None,
         reward_backend="auto",
         push_count=0,
         push_frame_range=(20, 90),
@@ -50,7 +51,13 @@ class RagdollEnv(gym.Env):
 
         self.render_mode = render_mode
         self.max_steps = max_steps
-        self.reference_motion = self._load_reference(reference_motion)
+        self.reference_motions = self._load_references(
+            reference_motion, reference_motions
+        )
+        self.motion_idx = 0
+        self.reference_motion = (
+            self.reference_motions[0] if self.reference_motions else None
+        )
         self.frame_idx = 0
         self.push_count = push_count
         self.push_frame_range = push_frame_range
@@ -75,13 +82,13 @@ class RagdollEnv(gym.Env):
         self._load_world()
         self._joint_specs = self._controllable_joints()
         action_dim = sum(dof for _, dof in self._joint_specs)
-        if self.reference_motion is not None:
-            if self.reference_motion.ndim != 2:
-                raise ValueError("reference_motion must be a 2D frame array")
-            if self.reference_motion.shape[1] != action_dim:
+        for motion in self.reference_motions:
+            if motion.ndim != 2:
+                raise ValueError("reference motions must be 2D frame arrays")
+            if motion.shape[1] != action_dim:
                 raise ValueError(
                     f"reference frames need {action_dim} joint angles, "
-                    f"got {self.reference_motion.shape[1]}"
+                    f"got {motion.shape[1]}"
                 )
 
         observation_dim = self._get_obs().shape[0]
@@ -95,10 +102,16 @@ class RagdollEnv(gym.Env):
             dtype=np.float32,
         )
 
+    @classmethod
+    def _load_references(cls, reference_motion, reference_motions):
+        if reference_motion is not None and reference_motions is not None:
+            raise ValueError("provide reference_motion or reference_motions, not both")
+        if reference_motions is None:
+            reference_motions = () if reference_motion is None else (reference_motion,)
+        return tuple(cls._load_reference(motion) for motion in reference_motions)
+
     @staticmethod
     def _load_reference(reference_motion):
-        if reference_motion is None:
-            return None
         if isinstance(reference_motion, (str, Path)):
             reference_motion = np.load(reference_motion)
         return np.asarray(reference_motion, dtype=np.float32)
@@ -326,6 +339,10 @@ class RagdollEnv(gym.Env):
             observation.extend(base_angular_velocity)
             observation.extend(self.reference_motion[reference_index])
             observation.append(reference_index / denominator)
+        if len(self.reference_motions) > 1:
+            observation.extend(
+                np.eye(len(self.reference_motions), dtype=np.float32)[self.motion_idx]
+            )
         return np.asarray(observation, dtype=np.float32)
 
     def _fallen(self):
@@ -335,10 +352,21 @@ class RagdollEnv(gym.Env):
         up_z = p.getMatrixFromQuaternion(base_orientation)[7]
         return base_position[2] < 1.8 or up_z < 0.5
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, motion_idx=None):
         super().reset(seed=seed)
         self._load_world()
         self._joint_specs = self._controllable_joints()
+        if self.reference_motions:
+            if motion_idx is None and options is not None:
+                motion_idx = options.get("motion_idx")
+            if motion_idx is None:
+                motion_idx = int(self.np_random.integers(len(self.reference_motions)))
+            if not 0 <= motion_idx < len(self.reference_motions):
+                raise ValueError(
+                    f"motion_idx must be in [0, {len(self.reference_motions) - 1}]"
+                )
+            self.motion_idx = motion_idx
+            self.reference_motion = self.reference_motions[motion_idx]
         if self.reference_motion is None:
             self._disable_motors()
         else:
@@ -360,7 +388,8 @@ class RagdollEnv(gym.Env):
             self._apply_pd_targets(self.reference_motion[0])
             self._pushes = self._sample_pushes()
             self._active_push.fill(0.0)
-        return self._get_obs(), {}
+        info = {"motion_idx": self.motion_idx} if self.reference_motion is not None else {}
+        return self._get_obs(), info
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
@@ -407,6 +436,7 @@ class RagdollEnv(gym.Env):
             "frame_idx": self.frame_idx,
             "imitation_reward": reward,
             "push_force": self._active_push.copy(),
+            "motion_idx": self.motion_idx,
         }
         return self._get_obs(), reward, terminated, False, info
 
