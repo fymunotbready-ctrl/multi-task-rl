@@ -6,7 +6,7 @@ from envs.meta_env import MultiTaskEnv, TASK_NAMES
 from envs.basketball.basketball_env import BasketballEnv
 from envs.driving.driving_env import DrivingEnv
 from envs.aiming.aiming_env import AimingEnv
-from shared.shared_trunk import encode_obs
+from envs.meta_env import encode_obs
 
 EVAL_ENVS = [BasketballEnv(), DrivingEnv(), AimingEnv()]
 EXTRA_STEPS = 500_000
