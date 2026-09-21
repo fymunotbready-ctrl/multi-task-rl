@@ -44,12 +44,12 @@ trained on (`eval_all.py`, `eval_multitask.py`).
 1. Clone, then `pip install -r requirements.txt` (Colab has PyTorch preinstalled).
 2. Train any skill: `python training/train_basketball.py` (same for driving/aiming/multitask).
 3. Validate: `python eval_all.py` / `python eval_multitask.py`.
+4. Smoke-test the ragdoll env: `python smoke_test_ragdoll.py --steps 1000 --check-env`.
 
 ## Roadmap
 
-Physics ragdoll motion agent (PyBullet humanoid, DeepMimic-style imitation
-reward, command-selected motions, live Gradio interface). See phases in
-repo history / `logs/`.
+The PyBullet humanoid environment is available; motion imitation, command-selected
+motions, and the live interface remain future phases.
 
 ## Honest limitations
 
@@ -61,5 +61,5 @@ repo history / `logs/`.
 
 ## Stack
 
-Python · Gymnasium · Stable-Baselines3 (PPO) · PyTorch · NumPy · GitHub Actions-free,
-phone-built workflow (Termux + Colab).
+Python · Gymnasium · Stable-Baselines3 (PPO) · PyTorch · PyBullet · NumPy ·
+GitHub Actions-free, phone-built workflow (Termux + Colab).
