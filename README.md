@@ -65,6 +65,25 @@ completed 50/50 motions (100%), with 0.664022 mean per-frame imitation reward
 and 120.00/120 mean/reference episode length. `assets/squat_eval.png` is the
 saved side-view frame strip.
 
+### Optional C++ reward
+
+The environment automatically uses the pybind11 reward extension when it is
+available and otherwise keeps the NumPy implementation. Build and verify it:
+
+```bash
+python3 -m pip install pybind11
+./build_reward_cpp.sh
+python3 test_reward.py
+python3 benchmark_reward.py --calls 100000 --steps 10000
+```
+
+The build script runs the equivalent of:
+
+```bash
+c++ -O3 -Wall -shared -std=c++17 -fPIC $(python3 -m pybind11 --includes) \
+  reward.cpp -o reward_cpp$(python3-config --extension-suffix)
+```
+
 ## Roadmap
 
 Squat imitation is available. Command-selected motions and the live interface
@@ -78,7 +97,7 @@ remain future phases.
 - The command interface (upcoming) maps fixed strings to trained motions;
   it is not open-ended language understanding.
 - The squat gate covers one generated motion in PyBullet DIRECT mode; GUI playback,
-  command mapping, multiple motions, C++ integration, and a live UI are not included.
+  command mapping, multiple motions, and a live UI are not included.
 
 ## Stack
 
