@@ -6,6 +6,8 @@ import numpy as np
 import pybullet as p
 import pybullet_data
 
+from reward import select_pose_similarity_reward
+
 
 class RagdollEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
@@ -16,7 +18,13 @@ class RagdollEnv(gym.Env):
     _ACTION_OFFSET_SCALE = 0.25
     _PD_FORCE = 200.0
 
-    def __init__(self, render_mode=None, max_steps=1000, reference_motion=None):
+    def __init__(
+        self,
+        render_mode=None,
+        max_steps=1000,
+        reference_motion=None,
+        reward_backend="auto",
+    ):
         super().__init__()
         if render_mode not in (None, "human", "rgb_array"):
             raise ValueError(f"unsupported render_mode: {render_mode}")
@@ -25,6 +33,9 @@ class RagdollEnv(gym.Env):
         self.max_steps = max_steps
         self.reference_motion = self._load_reference(reference_motion)
         self.frame_idx = 0
+        self._pose_similarity_reward, self.reward_backend = (
+            select_pose_similarity_reward(reward_backend)
+        )
         mode = p.GUI if render_mode == "human" else p.DIRECT
         self.client_id = p.connect(mode)
         if self.client_id < 0:
@@ -299,8 +310,7 @@ class RagdollEnv(gym.Env):
             return self._get_obs(), 0.0, False, truncated, {}
 
         current_angles = self.get_joint_angles()
-        squared_error = float(np.sum((current_angles - reference) ** 2))
-        reward = float(np.exp(-2.0 * squared_error))
+        reward = self._pose_similarity_reward(current_angles, reference)
         self.frame_idx += 1
         fallen = self._fallen()
         completed = self.frame_idx >= len(self.reference_motion) and not fallen
