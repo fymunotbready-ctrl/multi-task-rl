@@ -8,7 +8,7 @@ from envs.aiming.aiming_env import AimingEnv
 TASK_NAMES = ["basketball", "driving", "aiming"]
 N_TASKS = len(TASK_NAMES)
 OBS_PAD = 6
-REWARD_SCALE = {"driving": 0.2}   # shared value head needs consistent scales
+REWARD_SCALE = {"driving": 0.2, "aiming": 0.2}
 
 
 def encode_obs(obs, task_idx):

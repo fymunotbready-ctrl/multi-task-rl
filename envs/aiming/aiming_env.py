@@ -5,6 +5,7 @@ import numpy as np
 G = 9.8
 DT = 0.05
 HIT_DIST = 0.5
+HIT_REWARD = 5.0
 
 
 class AimingEnv(gym.Env):
@@ -58,7 +59,7 @@ class AimingEnv(gym.Env):
         reward = -0.005
         hit = self.min_dist < HIT_DIST
         if hit:
-            reward = 1.0
+            reward = HIT_REWARD
 
         terminated = hit or self.ball[1] < -5 or self.ball[0] > 20
         truncated = self.steps >= 300

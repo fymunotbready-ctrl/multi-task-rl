@@ -26,7 +26,7 @@ def task_success(model, env, idx, n=100):
     return hits / n
 
 
-path = sys.argv[1] if len(sys.argv) > 1 else "models/joint_trunk_best.zip"
+path = sys.argv[1] if len(sys.argv) > 1 else "models/joint_trunk_final_v2.zip"
 model = PPO.load(path)
 for i, name in enumerate(TASK_NAMES):
     print(f"JOINT  {name:12s} success: {task_success(model, EVAL_ENVS[i], i)*100:5.1f}%  ({path})")

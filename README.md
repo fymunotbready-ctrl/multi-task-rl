@@ -10,7 +10,7 @@ GitHub) with free Google Colab compute. Zero budget.
 |--------------|--------------------|-------------------------|
 | Basketball   | 100%               | 100%                    |
 | Driving      | 100%               | 100%                    |
-| Aiming       | 94%                | 82%                     |
+| Aiming       | 94%                | 84%                     |
 
 Success = scored / reached / hit. Evaluated on seeds the agents never
 trained on (`eval_all.py`, `eval_multitask.py`).
@@ -36,7 +36,7 @@ trained on (`eval_all.py`, `eval_multitask.py`).
    bonus (5.0) that beats any farming strategy.
 3. **Multi-task needs task IDs.** Shared model v1 without a one-hot task
    vector scored 0%/4%/2% — the policy couldn't tell which game it was
-   playing. v2 with task conditioning + reward normalization: 100/100/82.
+   playing. v2 with task conditioning + reward normalization: 100/100/84.
 4. **Trust success rate, never shaped-reward averages.**
 
 ## Reproduce
@@ -55,7 +55,7 @@ repo history / `logs/`.
 
 - All tasks are 2D, single-episode, fully observed toy physics — not
   image-based or partially observable RL.
-- "82% on aiming" means the shared model misses ~1 in 5 moving targets.
+- "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
 - The command interface (upcoming) maps fixed strings to trained motions;
   it is not open-ended language understanding.
 
