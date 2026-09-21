@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model", default="models/squat_disturbed_ppo.zip")
 parser.add_argument("--motion", default="motions/squat.npy")
 parser.add_argument("--episodes", type=int, default=50)
+parser.add_argument("--seed-start", type=int, default=10_000)
 parser.add_argument(
     "--settings",
     choices=("disturbed", "undisturbed"),
@@ -48,8 +49,8 @@ def evaluate(policy, env_kwargs, capture=False):
     visual_labels = []
     try:
         for episode in range(args.episodes):
-            observation, _ = env.reset(seed=10_000 + episode)
-            rng = np.random.default_rng(20_000 + episode)
+            observation, _ = env.reset(seed=args.seed_start + episode)
+            rng = np.random.default_rng(args.seed_start + 10_000 + episode)
             push_start = env._pushes[0][0] if env._pushes else -1
             capture_at = {
                 push_start - 1: "before push",
