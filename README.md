@@ -95,39 +95,67 @@ completion: a passing 16 percentage-point PPO advantage. Without disturbance,
 the rates were 100%, 100%, and 94%. `assets/squat_disturbed_eval.png` shows a
 completed disturbed PPO episode before, during, and after its push.
 
+### Motion-conditioned commands
+
+One PPO policy handles squat, shoot, and dunk-reach references. Each episode
+samples a motion and appends its three-value one-hot ID to the recovery
+observation, producing 109 values. The exact commands `squat down`, `shoot the
+target`, and `dunk it` select those IDs through `commands.py`; this is fixed
+command routing, not open-ended language understanding. Dunk is an overhead
+reach with toe rise, not an airborne jump.
+
+```bash
+python motions/generate_squat.py
+python motions/generate_shoot.py
+python motions/generate_dunk.py
+python training/train_motion_conditioned.py --steps 600000 --seed 97
+python training/train_motion_conditioned.py --input-model models/motion_conditioned_ppo.zip --steps 398000 --seed 97
+python eval_motion_conditioned.py --episodes 50 --fidelity-episodes 20
+python test_commands.py
+```
+
+The selected checkpoint used 999,424 actual timesteps in one configuration.
+On held-out seeds 10000–10049, undisturbed PPO completion was 100% for every
+motion. Disturbed PPO/zero completion was 82/70% for squat, 86/90% for shoot,
+and 82/16% for dunk-reach. Squat and dunk-reach pass the recovery gate; shoot
+does not, with a -4 percentage-point PPO gap. Motion fidelity selected the
+commanded reference in 20/20 disturbed episodes for each motion. The three
+`assets/*_conditioned_eval.png` strips show representative disturbed rollouts.
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
 available and otherwise keeps the NumPy implementation. Build and verify it:
 
 ```bash
-python3 -m pip install pybind11
+python -m pip install pybind11
 ./build_reward_cpp.sh
-python3 test_reward.py
-python3 benchmark_reward.py --calls 100000 --steps 10000
+python test_reward.py
+python benchmark_reward.py --calls 100000 --steps 10000
 ```
 
 The build script runs the equivalent of:
 
 ```bash
-c++ -O3 -Wall -shared -std=c++17 -fPIC $(python3 -m pybind11 --includes) \
-  reward.cpp -o reward_cpp$(python3-config --extension-suffix)
+c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
+  reward.cpp -o reward_cpp$(python-config --extension-suffix)
 ```
 
 ## Roadmap
 
-Squat imitation is available. Command-selected motions and the live interface
-remain future phases.
+Squat, shoot, and dunk-reach imitation are available through fixed command
+routing. A live interface remains a future phase.
 
 ## Honest limitations
 
 - All tasks are 2D, single-episode, fully observed toy physics — not
   image-based or partially observable RL.
 - "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
-- The command interface (upcoming) maps fixed strings to trained motions;
-  it is not open-ended language understanding.
-- The squat gate covers one generated motion in PyBullet DIRECT mode; GUI playback,
-  command mapping, multiple motions, and a live UI are not included.
+- The command interface maps three fixed strings to trained motions; it is not
+  open-ended language understanding.
+- Motions are hand-authored references. Dunk-reach has no airborne phase, and
+  the shoot recovery gate did not beat its zero-action baseline.
+- Evaluation uses PyBullet DIRECT-mode simulation; a live UI is not included.
 
 ## Stack
 
