@@ -4,7 +4,7 @@ One shared neural network (PPO / Stable-Baselines3) trained to solve three
 distinct 2D physics control tasks. Built entirely on a phone (Termux +
 GitHub) with free Google Colab compute. Zero budget.
 
-## Results (held-out seeds, deterministic policy, 50 episodes per task)
+## Results (held-out seeds, deterministic policy)
 
 | Task         | Single-skill model | Shared multi-task model |
 |--------------|--------------------|-------------------------|
@@ -22,8 +22,8 @@ trained on (`eval_all.py`, `eval_multitask.py`).
 - `envs/meta_env.py`: each episode samples one task at random; a one-hot
   task ID is appended to the observation (9-dim) so the shared policy
   knows which skill it's playing.
-- Driving's reward is scaled by 0.1 inside the meta-env so no task
-  dominates the shared gradient.
+- Driving and aiming rewards are scaled by 0.2 inside the meta-env so no
+  task dominates the shared gradient.
 
 ## Key lessons (the debugging story)
 

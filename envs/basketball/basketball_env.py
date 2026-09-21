@@ -69,4 +69,4 @@ class BasketballEnv(gym.Env):
         if terminated and not scored:
             reward += max(0.0, 0.8 - 0.2 * self.min_dist)
 
-        return self._obs(), reward, terminated, truncated, {}
+        return self._obs(), reward, terminated, truncated, {"success": bool(scored)}

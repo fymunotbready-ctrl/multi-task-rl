@@ -84,5 +84,5 @@ def save_trunk(model, path: str):
 
 
 def load_trunk(model, path: str):
-    sd = torch.load(path, map_location=model.device)
+    sd = torch.load(path, map_location=model.device, weights_only=True)
     model.policy.features_extractor.load_state_dict(sd, strict=True)
