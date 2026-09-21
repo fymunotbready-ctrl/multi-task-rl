@@ -24,15 +24,43 @@ class RagdollEnv(gym.Env):
         max_steps=1000,
         reference_motion=None,
         reward_backend="auto",
+        push_count=0,
+        push_frame_range=(20, 90),
+        push_force_range=(0.0, 0.0),
+        push_duration_range=(1, 1),
+        action_noise_std=0.0,
+        control_strength=1.0,
+        include_reference_observation=False,
     ):
         super().__init__()
         if render_mode not in (None, "human", "rgb_array"):
             raise ValueError(f"unsupported render_mode: {render_mode}")
+        if push_count < 0:
+            raise ValueError("push_count must be non-negative")
+        if action_noise_std < 0.0:
+            raise ValueError("action_noise_std must be non-negative")
+        if control_strength <= 0.0:
+            raise ValueError("control_strength must be positive")
+        if push_frame_range[0] < 0 or push_frame_range[1] < push_frame_range[0]:
+            raise ValueError("push_frame_range must be ordered and non-negative")
+        if push_force_range[0] < 0.0 or push_force_range[1] < push_force_range[0]:
+            raise ValueError("push_force_range must be ordered and non-negative")
+        if push_duration_range[0] < 1 or push_duration_range[1] < push_duration_range[0]:
+            raise ValueError("push_duration_range must be ordered and positive")
 
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.reference_motion = self._load_reference(reference_motion)
         self.frame_idx = 0
+        self.push_count = push_count
+        self.push_frame_range = push_frame_range
+        self.push_force_range = push_force_range
+        self.push_duration_range = push_duration_range
+        self.action_noise_std = action_noise_std
+        self.control_strength = control_strength
+        self.include_reference_observation = include_reference_observation
+        self._pushes = []
+        self._active_push = np.zeros(3, dtype=np.float32)
         self._pose_similarity_reward, self.reward_backend = (
             select_pose_similarity_reward(reward_backend)
         )
@@ -202,7 +230,7 @@ class RagdollEnv(gym.Env):
                     joint_index,
                     p.POSITION_CONTROL,
                     targetPosition=float(target[0]),
-                    force=self._PD_FORCE,
+                    force=self._PD_FORCE * self.control_strength,
                     positionGain=0.4,
                     velocityGain=1.0,
                     physicsClientId=self.client_id,
@@ -214,7 +242,7 @@ class RagdollEnv(gym.Env):
                     p.POSITION_CONTROL,
                     targetPosition=self._rotation_vector_to_quaternion(target),
                     targetVelocity=[0.0] * dof,
-                    force=[self._PD_FORCE] * dof,
+                    force=[self._PD_FORCE * self.control_strength] * dof,
                     positionGain=0.4,
                     velocityGain=1.0,
                     physicsClientId=self.client_id,
@@ -234,6 +262,41 @@ class RagdollEnv(gym.Env):
                 angles.extend(np.asarray(axis) * angle)
         return np.asarray(angles, dtype=np.float32)
 
+    def _sample_pushes(self):
+        pushes = []
+        frame_low, frame_high = self.push_frame_range
+        force_low, force_high = self.push_force_range
+        duration_low, duration_high = self.push_duration_range
+        for _ in range(self.push_count):
+            start = int(self.np_random.integers(frame_low, frame_high + 1))
+            duration = int(self.np_random.integers(duration_low, duration_high + 1))
+            magnitude = float(self.np_random.uniform(force_low, force_high))
+            angle = float(self.np_random.uniform(0.0, 2.0 * np.pi))
+            force = np.array(
+                [magnitude * np.cos(angle), magnitude * np.sin(angle), 0.0],
+                dtype=np.float32,
+            )
+            pushes.append((start, start + duration, force))
+        return pushes
+
+    def _apply_active_push(self):
+        self._active_push.fill(0.0)
+        for start, end, force in self._pushes:
+            if start <= self.frame_idx < end:
+                self._active_push += force
+        if np.any(self._active_push):
+            base_position = p.getBasePositionAndOrientation(
+                self.humanoid_id, physicsClientId=self.client_id
+            )[0]
+            p.applyExternalForce(
+                self.humanoid_id,
+                -1,
+                forceObj=self._active_push.tolist(),
+                posObj=base_position,
+                flags=p.WORLD_FRAME,
+                physicsClientId=self.client_id,
+            )
+
     def _get_obs(self):
         joint_positions = []
         joint_velocities = []
@@ -247,13 +310,23 @@ class RagdollEnv(gym.Env):
         base_position, base_orientation = p.getBasePositionAndOrientation(
             self.humanoid_id, physicsClientId=self.client_id
         )
-        return np.asarray(
+        observation = (
             joint_positions
             + joint_velocities
             + list(base_position)
-            + list(base_orientation),
-            dtype=np.float32,
+            + list(base_orientation)
         )
+        if self.reference_motion is not None and self.include_reference_observation:
+            base_linear_velocity, base_angular_velocity = p.getBaseVelocity(
+                self.humanoid_id, physicsClientId=self.client_id
+            )
+            reference_index = min(self.frame_idx, len(self.reference_motion) - 1)
+            denominator = max(len(self.reference_motion) - 1, 1)
+            observation.extend(base_linear_velocity)
+            observation.extend(base_angular_velocity)
+            observation.extend(self.reference_motion[reference_index])
+            observation.append(reference_index / denominator)
+        return np.asarray(observation, dtype=np.float32)
 
     def _fallen(self):
         base_position, base_orientation = p.getBasePositionAndOrientation(
@@ -285,6 +358,8 @@ class RagdollEnv(gym.Env):
             )
             self._set_joint_pose(self.reference_motion[0])
             self._apply_pd_targets(self.reference_motion[0])
+            self._pushes = self._sample_pushes()
+            self._active_push.fill(0.0)
         return self._get_obs(), {}
 
     def step(self, action):
@@ -298,10 +373,21 @@ class RagdollEnv(gym.Env):
             self._apply_torques(action)
         else:
             reference = self.reference_motion[self.frame_idx]
-            target = reference + self._ACTION_OFFSET_SCALE * action
+            noisy_action = action
+            if self.action_noise_std:
+                noisy_action = np.clip(
+                    action
+                    + self.np_random.normal(
+                        0.0, self.action_noise_std, size=action.shape
+                    ),
+                    -1.0,
+                    1.0,
+                )
+            target = reference + self._ACTION_OFFSET_SCALE * noisy_action
             self._apply_pd_targets(target)
 
         for _ in range(self._CONTROL_SUBSTEPS):
+            self._apply_active_push()
             p.stepSimulation(physicsClientId=self.client_id)
         self.steps += 1
 
@@ -320,6 +406,7 @@ class RagdollEnv(gym.Env):
             "fallen": fallen,
             "frame_idx": self.frame_idx,
             "imitation_reward": reward,
+            "push_force": self._active_push.copy(),
         }
         return self._get_obs(), reward, terminated, False, info
 
