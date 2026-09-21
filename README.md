@@ -65,6 +65,36 @@ completed 50/50 motions (100%), with 0.664022 mean per-frame imitation reward
 and 120.00/120 mean/reference episode length. `assets/squat_eval.png` is the
 saved side-view frame strip.
 
+### Disturbed squat recovery
+
+Disturbance training is opt-in; the reference-free environment still has its
+71-value observation and direct torque actions. The recovery configuration adds
+the 28 target joint angles, base linear/angular velocity, and motion phase to
+make a 106-value observation. It applies one seeded horizontal base push between
+frames 25 and 80 at 960–1200 N for 4–8 control frames, adds Gaussian action
+noise with standard deviation 0.02, and scales PD force to 80%. The imitation
+reward and its C++/NumPy implementations are unchanged.
+
+```bash
+python calibrate_disturbances.py --episodes 50
+python training/train_disturbed_squat.py --steps 500000 --seed 37 --force-max 1000
+python training/train_disturbed_squat.py --input-model models/squat_disturbed_ppo.zip --steps 300000 --seed 73 --force-max 1200
+python training/train_disturbed_squat.py --input-model models/squat_disturbed_ppo.zip --steps 20000 --seed 73
+python training/train_disturbed_squat.py --input-model models/squat_disturbed_ppo.zip --steps 20000 --seed 73
+python eval_disturbed_squat.py --episodes 50
+```
+
+Calibration on seeds 10000–10049 produced zero/random completion rates of
+100/28%, 94/28%, 88/22%, 80/24%, and 70/20% at maximum push forces of 0, 400,
+700, 1000, and 1200 N. The selected 1200 N level is the first calibrated level
+at the 70% zero-action ceiling. The final PPO checkpoint contains 843,776
+timesteps.
+
+The same 50 disturbance seeds produced 86% PPO, 70% zero-action, and 20% random
+completion: a passing 16 percentage-point PPO advantage. Without disturbance,
+the rates were 100%, 100%, and 94%. `assets/squat_disturbed_eval.png` shows a
+completed disturbed PPO episode before, during, and after its push.
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
