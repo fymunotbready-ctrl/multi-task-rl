@@ -42,14 +42,33 @@ trained on (`eval_all.py`, `eval_multitask.py`).
 ## Reproduce
 
 1. Clone, then `pip install -r requirements.txt` (Colab has PyTorch preinstalled).
-2. Train any skill: `python training/train_basketball.py` (same for driving/aiming/multitask).
-3. Validate: `python eval_all.py` / `python eval_multitask.py`.
-4. Smoke-test the ragdoll env: `python smoke_test_ragdoll.py --steps 1000 --check-env`.
+2. Train any 2D skill: `python training/train_basketball.py` (same for driving/aiming/multitask).
+3. Validate the 2D skills: `python eval_all.py` / `python eval_multitask.py`.
+4. Smoke-test the reference-free ragdoll: `python smoke_test_ragdoll.py --steps 1000 --check-env`.
+
+### Squat imitation
+
+```bash
+python motions/generate_squat.py
+python training/train_squat.py --steps 100000
+python eval_squat.py --episodes 50 --visual assets/squat_eval.png
+```
+
+The generated motion contains 120 frames of 28 joint-angle targets. In
+reference mode, each normalized policy action becomes a small offset from the
+current reference pose and PyBullet's position controller supplies PD balance.
+This avoids asking PPO to discover floating-base balance directly from raw
+torques; reference-free ragdoll mode retains the original torque controls.
+
+Gate 3 evaluation used 50 fixed-seed, deterministic episodes. The trained model
+completed 50/50 motions (100%), with 0.664022 mean per-frame imitation reward
+and 120.00/120 mean/reference episode length. `assets/squat_eval.png` is the
+saved side-view frame strip.
 
 ## Roadmap
 
-The PyBullet humanoid environment is available; motion imitation, command-selected
-motions, and the live interface remain future phases.
+Squat imitation is available. Command-selected motions and the live interface
+remain future phases.
 
 ## Honest limitations
 
@@ -58,6 +77,8 @@ motions, and the live interface remain future phases.
 - "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
 - The command interface (upcoming) maps fixed strings to trained motions;
   it is not open-ended language understanding.
+- The squat gate covers one generated motion in PyBullet DIRECT mode; GUI playback,
+  command mapping, multiple motions, C++ integration, and a live UI are not included.
 
 ## Stack
 
