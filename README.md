@@ -122,6 +122,20 @@ does not, with a -4 percentage-point PPO gap. Motion fidelity selected the
 commanded reference in 20/20 disturbed episodes for each motion. The three
 `assets/*_conditioned_eval.png` strips show representative disturbed rollouts.
 
+### Live command interface
+
+`app.py` provides a Gradio text box, Run command button, and Surprise me
+button. It reuses the Phase 4 checkpoint without retraining. The callback is a
+generator: it advances PyBullet once and yields the newly rendered frame, so
+the browser sees the simulation as it runs rather than receiving a pre-built
+video or frame list.
+
+```bash
+python app.py
+python test_app.py
+```
+
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
@@ -144,7 +158,7 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ## Roadmap
 
 Squat, shoot, and dunk-reach imitation are available through fixed command
-routing. A live interface remains a future phase.
+routing and a live-streaming Gradio interface.
 
 ## Honest limitations
 
@@ -155,7 +169,7 @@ routing. A live interface remains a future phase.
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.
-- Evaluation uses PyBullet DIRECT-mode simulation; a live UI is not included.
+- Evaluation and the Gradio stream use PyBullet DIRECT-mode RGB rendering.
 
 ## Stack
 

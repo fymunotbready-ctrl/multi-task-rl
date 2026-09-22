@@ -4,3 +4,4 @@ torch==2.3.0
 stable-baselines3==2.3.2
 matplotlib==3.8.4
 pybullet==3.2.7
+gradio==5.49.1
