@@ -5,10 +5,16 @@ from basketball_shoot import UNDISTURBED_BASKETBALL_ENV_KWARGS
 from envs.ragdoll import BasketballShootEnv
 
 
-env = BasketballShootEnv(**UNDISTURBED_BASKETBALL_ENV_KWARGS)
+env = BasketballShootEnv(
+    **UNDISTURBED_BASKETBALL_ENV_KWARGS,
+    release_imitation_weight=0.2,
+)
 try:
     observation, info = env.reset(seed=10_000)
-    assert observation.shape == (109,)
+    assert observation.shape == (113,)
+    hoop_vector = env.HOOP_POSITION - env._hand_position()
+    np.testing.assert_allclose(observation[-4:-1], hoop_vector, rtol=1e-6)
+    assert np.isclose(observation[-1], np.linalg.norm(hoop_vector))
     assert info["motion_idx"] == env.SHOOT_MOTION_IDX
     assert len(env.rim_ids) == env.RIM_SEGMENTS
     assert (
@@ -26,8 +32,15 @@ try:
             np.zeros(28, dtype=np.float32)
         )
         assert np.isfinite(reward)
+        expected_imitation_weight = (
+            0.2
+            if final_info["frame_idx"]
+            > env.RELEASE_FRAME - env.release_window_frames
+            else 1.0
+        )
+        assert final_info["imitation_weight"] == expected_imitation_weight
         assert reward == (
-            final_info["imitation_reward"]
+            final_info["weighted_imitation_reward"]
             + env.shot_outcome_weight * final_info["shot_outcome_reward"]
         )
         assert not truncated
@@ -82,4 +95,26 @@ try:
 finally:
     env.close()
 
-print("OK - dense shot reward, curriculum, rim, release, and make checks passed")
+randomized_env = BasketballShootEnv(
+    **UNDISTURBED_BASKETBALL_ENV_KWARGS,
+    start_position_randomization=0.2,
+    start_yaw_randomization_degrees=5.0,
+)
+try:
+    randomized_observation, _ = randomized_env.reset(seed=10_002)
+    base_position = p.getBasePositionAndOrientation(
+        randomized_env.humanoid_id, physicsClientId=randomized_env.client_id
+    )[0]
+    assert abs(base_position[0]) <= 0.21
+    assert abs(base_position[1]) <= 0.21
+    randomized_vector = randomized_env.HOOP_POSITION - randomized_env._hand_position()
+    np.testing.assert_allclose(
+        randomized_observation[-4:-1], randomized_vector, rtol=1e-6
+    )
+finally:
+    randomized_env.close()
+
+print(
+    "OK - hoop observation, imitation annealing, start randomization, "
+    "dense reward, rim, release, and make checks passed"
+)

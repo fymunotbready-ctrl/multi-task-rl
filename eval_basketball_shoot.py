@@ -66,7 +66,12 @@ def evaluate(policy, capture_made=False):
             info = {}
             while not done:
                 if policy == "ppo":
-                    action, _ = model.predict(observation, deterministic=True)
+                    policy_observation = observation[
+                        : model.observation_space.shape[0]
+                    ]
+                    action, _ = model.predict(
+                        policy_observation, deterministic=True
+                    )
                 else:
                     action = np.zeros(28, dtype=np.float32)
                 observation, _, terminated, truncated, info = env.step(action)
