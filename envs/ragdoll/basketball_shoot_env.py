@@ -18,6 +18,7 @@ class BasketballShootEnv(RagdollEnv):
     DEFAULT_PROGRESS_REWARD_SCALE = 1.0
     DEFAULT_RELEASE_QUALITY_SCALE = 0.5
     DEFAULT_BALLISTIC_DISTANCE_SIGMA = 0.75
+    DEFAULT_RELEASE_WINDOW_FRAMES = 25
 
     def __init__(
         self,
@@ -27,6 +28,10 @@ class BasketballShootEnv(RagdollEnv):
         release_quality_scale=DEFAULT_RELEASE_QUALITY_SCALE,
         ballistic_distance_sigma=DEFAULT_BALLISTIC_DISTANCE_SIGMA,
         hoop_radius_scale=1.0,
+        release_imitation_weight=1.0,
+        release_window_frames=DEFAULT_RELEASE_WINDOW_FRAMES,
+        start_position_randomization=0.0,
+        start_yaw_randomization_degrees=0.0,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -34,10 +39,20 @@ class BasketballShootEnv(RagdollEnv):
             raise ValueError("basketball shoot requires the conditioned shoot motion")
         if ballistic_distance_sigma <= 0.0:
             raise ValueError("ballistic_distance_sigma must be positive")
+        if release_window_frames < 1:
+            raise ValueError("release_window_frames must be positive")
+        if start_position_randomization < 0.0:
+            raise ValueError("start_position_randomization must be non-negative")
+        if start_yaw_randomization_degrees < 0.0:
+            raise ValueError("start_yaw_randomization_degrees must be non-negative")
         self.shot_outcome_weight = float(shot_outcome_weight)
         self.progress_reward_scale = float(progress_reward_scale)
         self.release_quality_scale = float(release_quality_scale)
         self.ballistic_distance_sigma = float(ballistic_distance_sigma)
+        self.release_window_frames = int(release_window_frames)
+        self.start_position_randomization = float(start_position_randomization)
+        self.start_yaw_randomization = np.radians(start_yaw_randomization_degrees)
+        self.set_release_imitation_weight(release_imitation_weight)
         self.set_hoop_radius_scale(hoop_radius_scale)
         self.episode_hoop_radius = self.HOOP_RADIUS * self.hoop_radius_scale
         self.ball_id = None
@@ -56,6 +71,13 @@ class BasketballShootEnv(RagdollEnv):
         self._made_rewarded = False
         self._previous_ball_position = None
 
+    def _get_obs(self):
+        observation = super()._get_obs()
+        hoop_vector = self.HOOP_POSITION - self._hand_position()
+        return np.concatenate(
+            (observation, hoop_vector, [np.linalg.norm(hoop_vector)])
+        ).astype(np.float32)
+
     def _hand_position(self):
         position = p.getLinkState(
             self.humanoid_id,
@@ -70,6 +92,34 @@ class BasketballShootEnv(RagdollEnv):
         if scale < 1.0:
             raise ValueError("hoop_radius_scale cannot be smaller than the real rim")
         self.hoop_radius_scale = scale
+
+    def set_release_imitation_weight(self, weight):
+        weight = float(weight)
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError("release imitation weight must be in [0, 1]")
+        self.release_imitation_weight = weight
+
+    def _randomize_start_pose(self):
+        if not self.start_position_randomization and not self.start_yaw_randomization:
+            return
+        position, orientation = p.getBasePositionAndOrientation(
+            self.humanoid_id, physicsClientId=self.client_id
+        )
+        offset = self.np_random.uniform(
+            -self.start_position_randomization,
+            self.start_position_randomization,
+            size=2,
+        )
+        roll, pitch, yaw = p.getEulerFromQuaternion(orientation)
+        yaw += self.np_random.uniform(
+            -self.start_yaw_randomization, self.start_yaw_randomization
+        )
+        p.resetBasePositionAndOrientation(
+            self.humanoid_id,
+            (position[0] + offset[0], position[1] + offset[1], position[2]),
+            p.getQuaternionFromEuler((roll, pitch, yaw)),
+            physicsClientId=self.client_id,
+        )
 
     def _create_ball_and_hoop(self):
         ball_collision = p.createCollisionShape(
@@ -263,6 +313,7 @@ class BasketballShootEnv(RagdollEnv):
         observation, info = super().reset(
             seed=seed, options=options, motion_idx=self.SHOOT_MOTION_IDX
         )
+        self._randomize_start_pose()
         self.episode_hoop_radius = self.HOOP_RADIUS * self.hoop_radius_scale
         self._create_ball_and_hoop()
         self.ball_released = False
@@ -279,7 +330,7 @@ class BasketballShootEnv(RagdollEnv):
         self._release_reward_pending = False
         self._previous_ball_position = self._hand_position()
         self._hold_ball()
-        return observation, {
+        return self._get_obs(), {
             **info,
             **self._basketball_info(self._empty_shot_components()),
         }
@@ -296,6 +347,7 @@ class BasketballShootEnv(RagdollEnv):
             "predicted_closest_distance": self.predicted_closest_distance,
             "min_hoop_distance": self.min_hoop_distance,
             "hoop_radius": self.episode_hoop_radius,
+            "release_imitation_weight": self.release_imitation_weight,
             "shot_make_reward": shot_components["make"],
             "shot_progress_reward": shot_components["progress"],
             "shot_release_quality_reward": shot_components["release_quality"],
@@ -308,15 +360,27 @@ class BasketballShootEnv(RagdollEnv):
     def step(self, action):
         if not self.ball_released:
             self._hold_ball()
+        imitation_frame = self.frame_idx
         observation, imitation_reward, terminated, truncated, info = super().step(action)
         if not self.ball_released and self.frame_idx >= self.RELEASE_FRAME:
             self._hold_ball()
             self._release_ball()
         shot_components = self._shot_outcome()
+        in_release_window = (
+            self.RELEASE_FRAME - self.release_window_frames
+            <= imitation_frame
+            < self.RELEASE_FRAME
+        )
+        imitation_weight = (
+            self.release_imitation_weight if in_release_window else 1.0
+        )
+        weighted_imitation_reward = imitation_weight * imitation_reward
         info.update(self._basketball_info(shot_components))
+        info["imitation_weight"] = imitation_weight
+        info["weighted_imitation_reward"] = weighted_imitation_reward
         return (
             observation,
-            imitation_reward
+            weighted_imitation_reward
             + self.shot_outcome_weight * info["shot_outcome_reward"],
             terminated,
             truncated,

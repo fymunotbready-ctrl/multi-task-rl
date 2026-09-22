@@ -14,6 +14,67 @@ from envs.ragdoll import BasketballShootEnv
 
 torch.set_num_threads(1)
 
+def load_model_with_expanded_observation(input_model, env, seed):
+    source_model = PPO.load(input_model)
+    source_dim = source_model.observation_space.shape[0]
+    target_dim = env.observation_space.shape[0]
+    if source_dim == target_dim:
+        source_model.set_env(env)
+        source_model.set_random_seed(seed)
+        return source_model
+    if target_dim != source_dim + 4:
+        raise ValueError(
+            f"expected four new hoop-relative observations, got {source_dim}->{target_dim}"
+        )
+
+    model = PPO(
+        source_model.policy_class,
+        env,
+        learning_rate=source_model.learning_rate,
+        n_steps=source_model.n_steps,
+        batch_size=source_model.batch_size,
+        n_epochs=source_model.n_epochs,
+        gamma=source_model.gamma,
+        gae_lambda=source_model.gae_lambda,
+        clip_range=source_model.clip_range,
+        clip_range_vf=source_model.clip_range_vf,
+        normalize_advantage=source_model.normalize_advantage,
+        ent_coef=source_model.ent_coef,
+        vf_coef=source_model.vf_coef,
+        max_grad_norm=source_model.max_grad_norm,
+        use_sde=source_model.use_sde,
+        sde_sample_freq=source_model.sde_sample_freq,
+        rollout_buffer_class=source_model.rollout_buffer_class,
+        rollout_buffer_kwargs=source_model.rollout_buffer_kwargs,
+        target_kl=source_model.target_kl,
+        stats_window_size=source_model._stats_window_size,
+        policy_kwargs=source_model.policy_kwargs,
+        seed=seed,
+        device=source_model.device,
+        verbose=1,
+    )
+    source_state = source_model.policy.state_dict()
+    target_state = model.policy.state_dict()
+    expanded_layers = {
+        "mlp_extractor.policy_net.0.weight",
+        "mlp_extractor.value_net.0.weight",
+    }
+    for name, target in target_state.items():
+        source = source_state[name]
+        if source.shape == target.shape:
+            target.copy_(source)
+        elif name in expanded_layers and target.shape[1] == source.shape[1] + 4:
+            target.zero_()
+            target[:, : source.shape[1]].copy_(source)
+        else:
+            raise ValueError(
+                f"cannot transfer policy parameter {name}: {source.shape}->{target.shape}"
+            )
+    model.policy.load_state_dict(target_state)
+    model.num_timesteps = source_model.num_timesteps
+    print(f"expanded observation: {source_dim}->{target_dim}; new inputs zero-initialized")
+    return model
+
 
 class BasketballTrainingCallback(BaseCallback):
     def __init__(
@@ -24,6 +85,8 @@ class BasketballTrainingCallback(BaseCallback):
         checkpoint_steps,
         hoop_scale_start,
         hoop_scale_end,
+        release_imitation_weight_start,
+        release_imitation_weight_end,
     ):
         super().__init__()
         self.output = output
@@ -32,6 +95,8 @@ class BasketballTrainingCallback(BaseCallback):
         self.checkpoint_steps = checkpoint_steps
         self.hoop_scale_start = hoop_scale_start
         self.hoop_scale_end = hoop_scale_end
+        self.release_imitation_weight_start = release_imitation_weight_start
+        self.release_imitation_weight_end = release_imitation_weight_end
         self.checkpoint_saved = False
 
     def _on_step(self):
@@ -41,11 +106,18 @@ class BasketballTrainingCallback(BaseCallback):
             hoop_scale = self.hoop_scale_start + progress * (
                 self.hoop_scale_end - self.hoop_scale_start
             )
+            imitation_weight = self.release_imitation_weight_start + progress * (
+                self.release_imitation_weight_end
+                - self.release_imitation_weight_start
+            )
             self.training_env.env_method("set_hoop_radius_scale", hoop_scale)
+            self.training_env.env_method(
+                "set_release_imitation_weight", imitation_weight
+            )
         if (
             self.checkpoint_steps
             and not self.checkpoint_saved
-            and additional > self.checkpoint_steps
+            and additional >= self.checkpoint_steps
         ):
             checkpoint_path = f"{self.output}_step{self.checkpoint_steps}"
             self.model.save(checkpoint_path)
@@ -55,25 +127,39 @@ class BasketballTrainingCallback(BaseCallback):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--steps", type=int, default=498_000)
-parser.add_argument("--input-model", default="models/motion_conditioned_ppo.zip")
-parser.add_argument("--output", default="models/basketball_shoot_stage1b")
-parser.add_argument("--seed", type=int, default=113)
+parser.add_argument("--steps", type=int, default=1_248_000)
+parser.add_argument("--input-model", default="models/basketball_shoot_stage1b.zip")
+parser.add_argument("--output", default="models/basketball_shoot_stage1c")
+parser.add_argument("--seed", type=int, default=251)
 parser.add_argument("--shot-weight", type=float, default=30.0)
 parser.add_argument("--progress-scale", type=float, default=1.0)
 parser.add_argument("--release-quality-scale", type=float, default=0.5)
 parser.add_argument("--ballistic-distance-sigma", type=float, default=0.75)
 parser.add_argument("--hoop-scale-start", type=float, default=1.0)
 parser.add_argument("--hoop-scale-end", type=float, default=1.0)
-parser.add_argument("--checkpoint-steps", type=int, default=249_856)
+parser.add_argument("--release-window-frames", type=int, default=25)
+parser.add_argument("--release-imitation-weight-start", type=float, default=1.0)
+parser.add_argument("--release-imitation-weight-end", type=float, default=0.1)
+parser.add_argument("--start-position-randomization", type=float, default=0.0)
+parser.add_argument("--start-yaw-randomization-degrees", type=float, default=0.0)
+parser.add_argument("--checkpoint-steps", type=int, default=624_640)
 args = parser.parse_args()
 
 if not args.input_model:
-    parser.error("--input-model is required; Stage 1b fine-tunes the Phase 4 policy")
+    parser.error("--input-model is required; Stage 1c fine-tunes Stage 1b")
 if args.hoop_scale_start < args.hoop_scale_end:
     parser.error("--hoop-scale-start must be at least --hoop-scale-end")
 if args.hoop_scale_end < 1.0:
     parser.error("--hoop-scale-end cannot be smaller than the real rim")
+if not 0.0 <= args.release_imitation_weight_end <= 1.0:
+    parser.error("--release-imitation-weight-end must be in [0, 1]")
+if not 0.0 <= args.release_imitation_weight_start <= 1.0:
+    parser.error("--release-imitation-weight-start must be in [0, 1]")
+if args.release_imitation_weight_start < args.release_imitation_weight_end:
+    parser.error(
+        "--release-imitation-weight-start must be at least "
+        "--release-imitation-weight-end"
+    )
 
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 env = BasketballShootEnv(
@@ -83,9 +169,12 @@ env = BasketballShootEnv(
     release_quality_scale=args.release_quality_scale,
     ballistic_distance_sigma=args.ballistic_distance_sigma,
     hoop_radius_scale=args.hoop_scale_start,
+    release_imitation_weight=args.release_imitation_weight_start,
+    release_window_frames=args.release_window_frames,
+    start_position_randomization=args.start_position_randomization,
+    start_yaw_randomization_degrees=args.start_yaw_randomization_degrees,
 )
-model = PPO.load(args.input_model, env=env)
-model.set_random_seed(args.seed)
+model = load_model_with_expanded_observation(args.input_model, env, args.seed)
 starting_timesteps = model.num_timesteps
 callback = BasketballTrainingCallback(
     output=args.output,
@@ -94,12 +183,20 @@ callback = BasketballTrainingCallback(
     checkpoint_steps=args.checkpoint_steps,
     hoop_scale_start=args.hoop_scale_start,
     hoop_scale_end=args.hoop_scale_end,
+    release_imitation_weight_start=args.release_imitation_weight_start,
+    release_imitation_weight_end=args.release_imitation_weight_end,
 )
 print(
     f"=== basketball shoot fine-tune: {args.steps} requested timesteps, "
     f"seed {args.seed}, starting at {starting_timesteps}, "
     f"shot weight {args.shot_weight}, progress {args.progress_scale}, "
     f"release quality {args.release_quality_scale}, "
+    f"release imitation {args.release_imitation_weight_start}"
+    f"->{args.release_imitation_weight_end} over frames "
+    f"{BasketballShootEnv.RELEASE_FRAME - args.release_window_frames}"
+    f"-{BasketballShootEnv.RELEASE_FRAME}, "
+    f"start randomization +/-{args.start_position_randomization}m, "
+    f"+/-{args.start_yaw_randomization_degrees}deg, "
     f"hoop {args.hoop_scale_start}x->{args.hoop_scale_end}x ==="
 )
 model.learn(total_timesteps=args.steps, reset_num_timesteps=False, callback=callback)

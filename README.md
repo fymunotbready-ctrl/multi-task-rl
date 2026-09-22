@@ -144,31 +144,38 @@ measured wrist velocity and continues under PyBullet physics. A make requires
 the ball center to cross downward through the rim plane within the 0.33 m
 clearance left by the 0.45 m rim and 0.12 m ball radii.
 
-The imitation reward is unchanged. The separate shot term now combines a
-one-time make reward, normalized closest-approach progress after release, and
-a one-time release-quality term based on the predicted ballistic miss distance
-and velocity alignment. The default weights are 30 for the combined shot term,
-1.0 for progress, and 0.5 for release quality. Training can optionally enlarge
-the physical rim and make detector, then linearly reduce both to the real
-0.45 m radius; evaluation always uses the real rim.
+The observation now appends the hoop vector from the shooting hand and its
+distance to the original 109 motion features. Stage 1c can linearly reduce
+imitation weight only during the 25 frames before release while retaining full
+imitation elsewhere, and can randomize the training start position and yaw.
+The Stage 1b policy is expanded from 109 to 113 inputs with zero-initialized
+new columns, preserving its behavior before fine-tuning.
+
+The separate shot term combines a one-time make reward, normalized
+closest-approach progress after release, and a one-time release-quality term
+based on the predicted ballistic miss distance and velocity alignment. The
+default weights are 30 for the combined shot term, 1.0 for progress, and 0.5
+for release quality. Evaluation always uses the physical 0.45 m rim.
 
 ```bash
-python training/train_basketball_shoot.py --steps 498000 --seed 211
-python eval_basketball_shoot.py --model models/basketball_shoot_stage1b.zip \
-  --episodes 50 --seed-start 10000 --visual assets/basketball_shoot_stage1b_made.png
+python training/train_basketball_shoot.py --steps 1248000 --seed 251
+python eval_basketball_shoot.py --model models/basketball_shoot_stage1c.zip \
+  --episodes 50 --seed-start 10000 --visual assets/basketball_shoot_stage1c_made.png
 python test_basketball_shoot.py
 ```
 
-Stage 1b evaluated midpoint and final checkpoints from four configurations on
-held-out seeds 20000–20049 and retained the best make rate, breaking ties by
-completion and then mean closest approach. The selected 499,712-step default
-reward run made 4/50 held-out shots at its final checkpoint. On the fixed gate
-seeds 10000–10049 it made 7/50 shots (14%) and completed 44/50 motions, versus
-4/50 (8%) and 43/50 for the Stage 1 checkpoint and 1/50 (2%) and 46/50 for
-zero-offset replay. The selected policy's mean release speed was 3.517 m/s and
-mean elevation angle was 12.25 degrees.
-`assets/basketball_shoot_stage1b_made.png` is a real made-shot rollout. This is
-a measured improvement, but 14% remains below the 30–40% demo-ready target.
+Stage 1c evaluated midpoint and final checkpoints from two configurations on
+held-out seeds 20000–20049. Both annealed release-window imitation from 1.0 to
+0.1; the selected configuration also randomized starts by ±0.25 m and ±5
+degrees. Its final checkpoint made 4/50 held-out shots after 1,249,280
+additional timesteps. The two configurations used 2,498,560 timesteps total.
+On fixed gate seeds 10000–10049, the selected checkpoint made 3/50 shots (6%)
+and completed 36/50 motions, versus 7/50 (14%) and 44/50 for Stage 1b and 1/50
+(2%) and 46/50 for zero-offset replay. Its mean release speed was 4.321 m/s and
+mean elevation angle was 4.13 degrees. `assets/basketball_shoot_stage1c_made.png`
+is a real made-shot rollout. Stage 1c is an accepted limitation: it regressed
+from Stage 1b and remains below the 30–40% demo-ready target, so no further
+retraining is proposed within this stage.
 
 ### Optional C++ reward
 
@@ -192,7 +199,8 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ## Roadmap
 Squat, shoot, and dunk-reach imitation are available through fixed command
 routing and a live-streaming Gradio interface. Basketball shoot has physical
-ball/rim mechanics but remains low-reliability at a 14% make rate.
+ball/rim mechanics but remains low-reliability; Stage 1b remains the stronger
+fixed-seed checkpoint at a 14% make rate.
 
 ## Honest limitations
 
@@ -203,8 +211,10 @@ ball/rim mechanics but remains low-reliability at a 14% make rate.
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.
-- Basketball shooting improved from 8% to 14% in Stage 1b, but remains below
-  the 30–40% demo-ready threshold after the 1,996,800-timestep budget.
+- Basketball shooting improved from 8% to 14% in Stage 1b. Stage 1c added
+  hoop-relative observation, release-window imitation annealing, and randomized
+  starts, but regressed to 6% after its 2,498,560-timestep budget. Both remain
+  below the 30–40% demo-ready threshold.
 - Evaluation and the Gradio stream use PyBullet DIRECT-mode RGB rendering.
 
 ## Stack
