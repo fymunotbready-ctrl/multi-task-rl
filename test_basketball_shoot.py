@@ -28,7 +28,7 @@ try:
         assert np.isfinite(reward)
         assert reward == (
             final_info["imitation_reward"]
-            + env.SHOT_OUTCOME_WEIGHT * final_info["shot_outcome_reward"]
+            + env.shot_outcome_weight * final_info["shot_outcome_reward"]
         )
         assert not truncated
         if terminated:
@@ -36,6 +36,21 @@ try:
     assert final_info["ball_released"]
     assert final_info["release_speed"] > 0.0
     assert np.isfinite(final_info["release_angle_degrees"])
+    assert final_info["shot_release_quality_reward"] > 0.0
+    assert np.isfinite(final_info["predicted_closest_distance"])
+
+    env._release_reward_pending = False
+    env._release_hoop_distance = 4.0
+    env._previous_best_hoop_distance = 2.0
+    env._previous_ball_position = env.HOOP_POSITION + np.array([0.0, 0.0, 1.5])
+    p.resetBasePositionAndOrientation(
+        env.ball_id,
+        env.HOOP_POSITION + np.array([0.0, 0.0, 1.5]),
+        (0.0, 0.0, 0.0, 1.0),
+        physicsClientId=env.client_id,
+    )
+    progress_components = env._shot_outcome()
+    assert progress_components["progress"] > 0.0
 
     env.ball_released = True
     env.made = False
@@ -47,10 +62,24 @@ try:
         (0.0, 0.0, 0.0, 1.0),
         physicsClientId=env.client_id,
     )
-    assert env._shot_outcome(done=False) == 1.0
+    make_components = env._shot_outcome()
+    assert make_components["make"] == 1.0
     assert env.made
-    assert env._shot_outcome(done=False) == 0.0
+    assert env._shot_outcome()["make"] == 0.0
+
+    env.set_hoop_radius_scale(2.0)
+    _, curriculum_info = env.reset(seed=10_001)
+    assert curriculum_info["hoop_radius"] == 2.0 * env.HOOP_RADIUS
+    rim_position = np.asarray(
+        p.getBasePositionAndOrientation(
+            env.rim_ids[0], physicsClientId=env.client_id
+        )[0]
+    )
+    assert np.isclose(
+        np.linalg.norm(rim_position[:2] - env.HOOP_POSITION[:2]),
+        curriculum_info["hoop_radius"],
+    )
 finally:
     env.close()
 
-print("OK - ball release, physical rim, and one-shot make detection passed")
+print("OK - dense shot reward, curriculum, rim, release, and make checks passed")

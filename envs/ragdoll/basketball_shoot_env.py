@@ -14,12 +14,32 @@ class BasketballShootEnv(RagdollEnv):
     HOOP_RADIUS = 0.45
     RIM_TUBE_RADIUS = 0.035
     RIM_SEGMENTS = 20
-    SHOT_OUTCOME_WEIGHT = 10.0
+    DEFAULT_SHOT_OUTCOME_WEIGHT = 30.0
+    DEFAULT_PROGRESS_REWARD_SCALE = 1.0
+    DEFAULT_RELEASE_QUALITY_SCALE = 0.5
+    DEFAULT_BALLISTIC_DISTANCE_SIGMA = 0.75
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        shot_outcome_weight=DEFAULT_SHOT_OUTCOME_WEIGHT,
+        progress_reward_scale=DEFAULT_PROGRESS_REWARD_SCALE,
+        release_quality_scale=DEFAULT_RELEASE_QUALITY_SCALE,
+        ballistic_distance_sigma=DEFAULT_BALLISTIC_DISTANCE_SIGMA,
+        hoop_radius_scale=1.0,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         if len(self.reference_motions) <= self.SHOOT_MOTION_IDX:
             raise ValueError("basketball shoot requires the conditioned shoot motion")
+        if ballistic_distance_sigma <= 0.0:
+            raise ValueError("ballistic_distance_sigma must be positive")
+        self.shot_outcome_weight = float(shot_outcome_weight)
+        self.progress_reward_scale = float(progress_reward_scale)
+        self.release_quality_scale = float(release_quality_scale)
+        self.ballistic_distance_sigma = float(ballistic_distance_sigma)
+        self.set_hoop_radius_scale(hoop_radius_scale)
+        self.episode_hoop_radius = self.HOOP_RADIUS * self.hoop_radius_scale
         self.ball_id = None
         self.rim_ids = []
         self.ball_released = False
@@ -27,8 +47,13 @@ class BasketballShootEnv(RagdollEnv):
         self.min_hoop_distance = float("inf")
         self.release_speed = 0.0
         self.release_angle_degrees = 0.0
-        self._made_rewarded = False
         self.release_alignment = 0.0
+        self.release_quality = 0.0
+        self.predicted_closest_distance = float("inf")
+        self._release_hoop_distance = 1.0
+        self._previous_best_hoop_distance = float("inf")
+        self._release_reward_pending = False
+        self._made_rewarded = False
         self._previous_ball_position = None
 
     def _hand_position(self):
@@ -39,6 +64,12 @@ class BasketballShootEnv(RagdollEnv):
             physicsClientId=self.client_id,
         )[0]
         return np.asarray(position, dtype=np.float64) + np.array([-0.14, 0.0, 0.04])
+
+    def set_hoop_radius_scale(self, scale):
+        scale = float(scale)
+        if scale < 1.0:
+            raise ValueError("hoop_radius_scale cannot be smaller than the real rim")
+        self.hoop_radius_scale = scale
 
     def _create_ball_and_hoop(self):
         ball_collision = p.createCollisionShape(
@@ -91,7 +122,7 @@ class BasketballShootEnv(RagdollEnv):
         )
         self.rim_ids = []
         for angle in np.linspace(0.0, 2.0 * np.pi, self.RIM_SEGMENTS, endpoint=False):
-            position = self.HOOP_POSITION + self.HOOP_RADIUS * np.array(
+            position = self.HOOP_POSITION + self.episode_hoop_radius * np.array(
                 [np.cos(angle), np.sin(angle), 0.0]
             )
             rim_id = p.createMultiBody(
@@ -150,11 +181,36 @@ class BasketballShootEnv(RagdollEnv):
             if denominator > 1e-8
             else 0.0
         )
+        times = np.linspace(0.0, 2.0, 121, dtype=np.float64)
+        gravity = np.array([0.0, 0.0, -9.81], dtype=np.float64)
+        trajectory = (
+            position
+            + times[:, None] * velocity
+            + 0.5 * times[:, None] ** 2 * gravity
+        )
+        distances = np.linalg.norm(trajectory - self.HOOP_POSITION, axis=1)
+        self.predicted_closest_distance = float(np.min(distances))
+        ballistic_quality = np.exp(
+            -self.predicted_closest_distance / self.ballistic_distance_sigma
+        )
+        self.release_quality = float(
+            ballistic_quality * max(0.0, self.release_alignment)
+        )
+        self._release_hoop_distance = max(
+            float(np.linalg.norm(position - self.HOOP_POSITION)), 1e-8
+        )
+        self._previous_best_hoop_distance = self._release_hoop_distance
+        self._release_reward_pending = True
         self._previous_ball_position = position
 
-    def _shot_outcome(self, done):
+    @staticmethod
+    def _empty_shot_components():
+        return {"make": 0.0, "progress": 0.0, "release_quality": 0.0}
+
+    def _shot_outcome(self):
+        components = self._empty_shot_components()
         if not self.ball_released:
-            return 0.0
+            return components
         position = np.asarray(
             p.getBasePositionAndOrientation(
                 self.ball_id, physicsClientId=self.client_id
@@ -163,7 +219,18 @@ class BasketballShootEnv(RagdollEnv):
         )
         distance = float(np.linalg.norm(position - self.HOOP_POSITION))
         self.min_hoop_distance = min(self.min_hoop_distance, distance)
-        inner_radius = self.HOOP_RADIUS - self.BALL_RADIUS
+        if distance < self._previous_best_hoop_distance:
+            components["progress"] = self.progress_reward_scale * (
+                self._previous_best_hoop_distance - distance
+            ) / self._release_hoop_distance
+            self._previous_best_hoop_distance = distance
+        if self._release_reward_pending:
+            components["release_quality"] = (
+                self.release_quality_scale * self.release_quality
+            )
+            self._release_reward_pending = False
+
+        inner_radius = self.episode_hoop_radius - self.BALL_RADIUS
         crossed_downward = (
             self._previous_ball_position is not None
             and self._previous_ball_position[2] >= self.HOOP_POSITION[2]
@@ -187,12 +254,8 @@ class BasketballShootEnv(RagdollEnv):
         self._previous_ball_position = position
         if self.made and not self._made_rewarded:
             self._made_rewarded = True
-            return 1.0
-        if done and not self.made:
-            distance_credit = max(0.0, 1.0 - self.min_hoop_distance / 2.0)
-            alignment_credit = max(0.0, self.release_alignment)
-            return 0.5 * distance_credit + 0.25 * alignment_credit
-        return 0.0
+            components["make"] = 1.0
+        return components
 
     def reset(self, seed=None, options=None, motion_idx=None):
         if motion_idx not in (None, self.SHOOT_MOTION_IDX):
@@ -200,6 +263,7 @@ class BasketballShootEnv(RagdollEnv):
         observation, info = super().reset(
             seed=seed, options=options, motion_idx=self.SHOOT_MOTION_IDX
         )
+        self.episode_hoop_radius = self.HOOP_RADIUS * self.hoop_radius_scale
         self._create_ball_and_hoop()
         self.ball_released = False
         self.made = False
@@ -208,20 +272,35 @@ class BasketballShootEnv(RagdollEnv):
         self.release_speed = 0.0
         self.release_angle_degrees = 0.0
         self.release_alignment = 0.0
+        self.release_quality = 0.0
+        self.predicted_closest_distance = float("inf")
+        self._release_hoop_distance = 1.0
+        self._previous_best_hoop_distance = float("inf")
+        self._release_reward_pending = False
         self._previous_ball_position = self._hand_position()
         self._hold_ball()
-        return observation, {**info, **self._basketball_info(0.0)}
+        return observation, {
+            **info,
+            **self._basketball_info(self._empty_shot_components()),
+        }
 
-    def _basketball_info(self, shot_outcome_reward):
+    def _basketball_info(self, shot_components):
+        shot_outcome_reward = sum(shot_components.values())
         return {
             "ball_released": self.ball_released,
             "made": self.made,
             "release_speed": self.release_speed,
             "release_angle_degrees": self.release_angle_degrees,
             "release_alignment": self.release_alignment,
+            "release_quality": self.release_quality,
+            "predicted_closest_distance": self.predicted_closest_distance,
             "min_hoop_distance": self.min_hoop_distance,
+            "hoop_radius": self.episode_hoop_radius,
+            "shot_make_reward": shot_components["make"],
+            "shot_progress_reward": shot_components["progress"],
+            "shot_release_quality_reward": shot_components["release_quality"],
             "weighted_shot_outcome_reward": (
-                self.SHOT_OUTCOME_WEIGHT * shot_outcome_reward
+                self.shot_outcome_weight * shot_outcome_reward
             ),
             "shot_outcome_reward": shot_outcome_reward,
         }
@@ -233,11 +312,12 @@ class BasketballShootEnv(RagdollEnv):
         if not self.ball_released and self.frame_idx >= self.RELEASE_FRAME:
             self._hold_ball()
             self._release_ball()
-        shot_outcome_reward = self._shot_outcome(terminated or truncated)
-        info.update(self._basketball_info(shot_outcome_reward))
+        shot_components = self._shot_outcome()
+        info.update(self._basketball_info(shot_components))
         return (
             observation,
-            imitation_reward + self.SHOT_OUTCOME_WEIGHT * shot_outcome_reward,
+            imitation_reward
+            + self.shot_outcome_weight * info["shot_outcome_reward"],
             terminated,
             truncated,
             info,
