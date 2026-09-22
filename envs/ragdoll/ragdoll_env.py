@@ -120,7 +120,7 @@ class RagdollEnv(gym.Env):
         p.resetSimulation(physicsClientId=self.client_id)
         p.setGravity(0.0, 0.0, -9.81, physicsClientId=self.client_id)
         p.setTimeStep(1.0 / self._SIMULATION_HZ, physicsClientId=self.client_id)
-        plane_id = p.loadURDF("plane.urdf", physicsClientId=self.client_id)
+        self.plane_id = p.loadURDF("plane.urdf", physicsClientId=self.client_id)
         base_orientation = p.getQuaternionFromEuler((np.pi / 2.0, 0.0, 0.0))
         self.humanoid_id = p.loadURDF(
             "humanoid/humanoid.urdf",
@@ -130,7 +130,7 @@ class RagdollEnv(gym.Env):
             physicsClientId=self.client_id,
         )
         p.changeDynamics(
-            plane_id, -1, lateralFriction=1.0, physicsClientId=self.client_id
+            self.plane_id, -1, lateralFriction=1.0, physicsClientId=self.client_id
         )
         for link_index in range(
             -1, p.getNumJoints(self.humanoid_id, physicsClientId=self.client_id)
