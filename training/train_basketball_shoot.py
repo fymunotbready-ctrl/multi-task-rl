@@ -9,7 +9,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 
 from basketball_shoot import BASKETBALL_ENV_KWARGS
-from envs.ragdoll import BasketballMissEnv, BasketballShootEnv
+from envs.ragdoll import BasketballDunkEnv, BasketballMissEnv, BasketballShootEnv
 
 
 torch.set_num_threads(1)
@@ -127,7 +127,7 @@ class BasketballTrainingCallback(BaseCallback):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--objective", choices=("shoot", "miss"), default="shoot")
+parser.add_argument("--objective", choices=("shoot", "miss", "dunk"), default="shoot")
 parser.add_argument("--steps", type=int, default=1_248_000)
 parser.add_argument("--input-model", default="models/basketball_shoot_stage1b.zip")
 parser.add_argument("--output", default="models/basketball_shoot_stage1c")
@@ -144,6 +144,7 @@ parser.add_argument("--release-imitation-weight-end", type=float, default=0.1)
 parser.add_argument("--start-position-randomization", type=float, default=0.0)
 parser.add_argument("--start-yaw-randomization-degrees", type=float, default=0.0)
 parser.add_argument("--checkpoint-steps", type=int, default=624_640)
+parser.add_argument("--jump-force", type=float, default=0.0)
 args = parser.parse_args()
 
 if not args.input_model:
@@ -163,19 +164,27 @@ if args.release_imitation_weight_start < args.release_imitation_weight_end:
     )
 
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-env_class = BasketballMissEnv if args.objective == "miss" else BasketballShootEnv
-env = env_class(
+env_classes = {
+    "shoot": BasketballShootEnv,
+    "miss": BasketballMissEnv,
+    "dunk": BasketballDunkEnv,
+}
+env_class = env_classes[args.objective]
+env_kwargs = {
     **BASKETBALL_ENV_KWARGS,
-    shot_outcome_weight=args.shot_weight,
-    progress_reward_scale=args.progress_scale,
-    release_quality_scale=args.release_quality_scale,
-    ballistic_distance_sigma=args.ballistic_distance_sigma,
-    hoop_radius_scale=args.hoop_scale_start,
-    release_imitation_weight=args.release_imitation_weight_start,
-    release_window_frames=args.release_window_frames,
-    start_position_randomization=args.start_position_randomization,
-    start_yaw_randomization_degrees=args.start_yaw_randomization_degrees,
-)
+    "shot_outcome_weight": args.shot_weight,
+    "progress_reward_scale": args.progress_scale,
+    "release_quality_scale": args.release_quality_scale,
+    "ballistic_distance_sigma": args.ballistic_distance_sigma,
+    "hoop_radius_scale": args.hoop_scale_start,
+    "release_imitation_weight": args.release_imitation_weight_start,
+    "release_window_frames": args.release_window_frames,
+    "start_position_randomization": args.start_position_randomization,
+    "start_yaw_randomization_degrees": args.start_yaw_randomization_degrees,
+}
+if args.objective == "dunk":
+    env_kwargs["jump_force"] = args.jump_force
+env = env_class(**env_kwargs)
 model = load_model_with_expanded_observation(args.input_model, env, args.seed)
 starting_timesteps = model.num_timesteps
 callback = BasketballTrainingCallback(
@@ -195,11 +204,12 @@ print(
     f"release quality {args.release_quality_scale}, "
     f"release imitation {args.release_imitation_weight_start}"
     f"->{args.release_imitation_weight_end} over frames "
-    f"{BasketballShootEnv.RELEASE_FRAME - args.release_window_frames}"
-    f"-{BasketballShootEnv.RELEASE_FRAME}, "
+    f"{env_class.RELEASE_FRAME - args.release_window_frames}"
+    f"-{env_class.RELEASE_FRAME}, "
     f"start randomization +/-{args.start_position_randomization}m, "
     f"+/-{args.start_yaw_randomization_degrees}deg, "
-    f"hoop {args.hoop_scale_start}x->{args.hoop_scale_end}x ==="
+    f"hoop {args.hoop_scale_start}x->{args.hoop_scale_end}x, "
+    f"jump force {args.jump_force}N ==="
 )
 model.learn(total_timesteps=args.steps, reset_num_timesteps=False, callback=callback)
 model.save(args.output)

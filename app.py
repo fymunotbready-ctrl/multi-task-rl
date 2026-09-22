@@ -7,17 +7,18 @@ from stable_baselines3 import PPO
 
 from commands import COMMAND_MAP, resolve_command
 from basketball_shoot import BASKETBALL_ENV_KWARGS
-from envs.ragdoll import BasketballMissEnv, RagdollEnv
+from envs.ragdoll import BasketballDunkEnv, BasketballMissEnv, RagdollEnv
 from envs.vehicle import VehicleEnv
 from multi_motion import MOTION_ENV_KWARGS
 
 MODEL_PATH = "models/motion_conditioned_ppo.zip"
 MISS_MODEL_PATH = "models/basketball_miss_ppo.zip"
 DRIFT_MODEL_PATH = "models/drift_ppo.zip"
+DUNK_MODEL_PATH = "models/basketball_dunk_ppo.zip"
 FRAME_INTERVAL_SECONDS = 1.0 / 30.0
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=5)
 def load_model(path=MODEL_PATH):
     return PPO.load(path)
 
@@ -49,6 +50,12 @@ def stream_command(command_text):
             **BASKETBALL_ENV_KWARGS,
         )
         model_path = MISS_MODEL_PATH
+    elif normalized == "dunk it":
+        env = BasketballDunkEnv(
+            render_mode="rgb_array",
+            **BASKETBALL_ENV_KWARGS,
+        )
+        model_path = DUNK_MODEL_PATH
     elif normalized == "drift":
         env = VehicleEnv(render_mode="rgb_array")
         model_path = DRIFT_MODEL_PATH

@@ -309,7 +309,9 @@ class BasketballShootEnv(RagdollEnv):
 
     def reset(self, seed=None, options=None, motion_idx=None):
         if motion_idx not in (None, self.SHOOT_MOTION_IDX):
-            raise ValueError("basketball shoot environment only supports motion_idx=1")
+            raise ValueError(
+                f"basketball environment only supports motion_idx={self.SHOOT_MOTION_IDX}"
+            )
         observation, info = super().reset(
             seed=seed, options=options, motion_idx=self.SHOOT_MOTION_IDX
         )

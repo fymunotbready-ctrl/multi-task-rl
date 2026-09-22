@@ -97,12 +97,13 @@ completed disturbed PPO episode before, during, and after its push.
 
 ### Motion-conditioned commands
 
-One PPO policy handles squat, shoot, and dunk-reach references. Each episode
-samples a motion and appends its three-value one-hot ID to the recovery
-observation, producing 109 values. The exact commands `squat down`, `shoot the
-target`, and `dunk it` select those IDs through `commands.py`; this is fixed
-command routing, not open-ended language understanding. Dunk is an overhead
-reach with toe rise, not an airborne jump.
+The base motion-conditioned PPO policy handles squat, shoot, and dunk-reach
+references. Each episode samples a motion and appends its three-value one-hot ID
+to the recovery observation, producing 109 values. The commands `squat down`
+and `shoot the target` still use those IDs through `commands.py`; this is fixed
+command routing, not open-ended language understanding. The original dunk
+reference is an overhead reach with toe rise. The later basketball-dunk stage
+replaces its app route with a dedicated airborne policy.
 
 ```bash
 python motions/generate_squat.py
@@ -125,9 +126,9 @@ commanded reference in 20/20 disturbed episodes for each motion. The three
 ### Live command interface
 
 `app.py` provides a Gradio text box, Run command button, and Surprise me
-button for squat, shoot, dunk-reach, and intentional miss. It loads the
-motion-conditioned policy for the first three commands and the dedicated Miss
-checkpoint for `miss the target`. The callback is a generator: it advances
+button for squat, shoot, airborne basketball dunk, intentional miss, and drift.
+Squat and shoot load the motion-conditioned policy; the other three commands
+load their dedicated checkpoints. The callback is a generator: it advances
 PyBullet once and yields the newly rendered frame, so the browser sees the
 simulation as it runs rather than receiving a pre-built video or frame list.
 
@@ -238,6 +239,34 @@ seeds 10000–10049, PPO averaged 28.11 degrees of slip, a 30.41-degree mean pea
 baseline averaged 3.97 degrees, a 12.08-degree mean peak, 1.140 m/s, and 50/50
 safe episodes. `assets/drift_rollout.png` shows the selected controlled drift.
 
+### Airborne basketball dunk
+
+`BasketballDunkEnv` reuses the 0.62 kg ball, physical rim, hoop-relative
+observations, and downward rim-plane make detector. It fixes the commanded
+reference to motion 2, applies a vertical force during frames 32–43, and
+releases the ball from the right wrist at frame 72 beside the close-range hoop.
+
+```bash
+python training/train_basketball_shoot.py --objective dunk --steps 498000 \
+  --input-model models/motion_conditioned_ppo.zip --jump-force 1500 \
+  --release-imitation-weight-start 1 --release-imitation-weight-end 1
+python eval_basketball_shoot.py --objective dunk \
+  --model models/basketball_dunk_ppo.zip --episodes 50 --seed-start 10000 \
+  --visual assets/basketball_dunk_rollout.png
+python test_basketball_dunk.py
+```
+
+Two airborne configurations used 499,712 actual timesteps each, 999,424 total.
+Both reached flight and landed reliably, so the non-airborne reach fallback was
+not used. The selected seed-509, 1500 N configuration made 2/50 baskets,
+completed 47/50 motions, reached flight in 50/50 episodes, landed in 48/50,
+and averaged 4.774 m peak base height on held-out seeds 20000–20049. On fixed
+gate seeds 10000–10049 it made 1/50, completed 49/50, reached flight in 50/50,
+landed in 48/50, and averaged 4.822 m peak height. Zero-action replay made
+11/50 on the same gate seeds, so the fine-tuned policy did not improve make
+reliability. `assets/basketball_dunk_rollout.png` is the gate's made airborne
+rollout.
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
@@ -258,8 +287,8 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ```
 
 ## Roadmap
-Squat, shoot, dunk-reach, intentional miss, and physics drift are available
-through fixed command routing and a live-streaming Gradio interface.
+Squat, shoot, airborne basketball dunk, intentional miss, and physics drift
+are available through fixed command routing and a live-streaming Gradio interface.
 Basketball shoot has physical ball/rim mechanics but remains low-reliability;
 Stage 1b remains the stronger fixed-seed shooting checkpoint at a 14% make
 rate.
@@ -271,8 +300,8 @@ rate.
 - "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
 - The command interface maps five fixed strings to trained behaviors; it is not
   open-ended language understanding.
-- Motions are hand-authored references. Dunk-reach has no airborne phase, and
-  the shoot recovery gate did not beat its zero-action baseline.
+- Motions use hand-authored references. The basketball dunk adds a fixed
+  vertical jump force, and the shoot recovery gate did not beat its zero-action baseline.
 - Basketball shooting improved from 8% to 14% in Stage 1b. Stage 1c added
   hoop-relative observation, release-window imitation annealing, and randomized
   starts, but regressed to 6% after its 2,498,560-timestep budget. Both remain
