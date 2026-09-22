@@ -144,30 +144,31 @@ measured wrist velocity and continues under PyBullet physics. A make requires
 the ball center to cross downward through the rim plane within the 0.33 m
 clearance left by the 0.45 m rim and 0.12 m ball radii.
 
-The imitation reward is still reported unchanged. A separate raw shot-outcome
-term gives 1.0 for a make or terminal partial credit from closest 3D distance
-and release alignment; training weights that term by 10. The closest-distance
-and terminal partial-credit structure comes from `AimingEnv`. The 3D wrist
-release speed, elevation angle, velocity alignment, physical rim, and
-pass-through test are new because the 2D aiming action does not map directly
-to articulated-body release velocity.
+The imitation reward is unchanged. The separate shot term now combines a
+one-time make reward, normalized closest-approach progress after release, and
+a one-time release-quality term based on the predicted ballistic miss distance
+and velocity alignment. The default weights are 30 for the combined shot term,
+1.0 for progress, and 0.5 for release quality. Training can optionally enlarge
+the physical rim and make detector, then linearly reduce both to the real
+0.45 m radius; evaluation always uses the real rim.
 
 ```bash
-python training/train_basketball_shoot.py --steps 100000 --seed 113
-python training/train_basketball_shoot.py --input-model models/basketball_shoot_ppo.zip --output models/basketball_shoot_ppo_attempt2 --steps 398000 --seed 127
-python eval_basketball_shoot.py --episodes 50
+python training/train_basketball_shoot.py --steps 498000 --seed 211
+python eval_basketball_shoot.py --model models/basketball_shoot_stage1b.zip \
+  --episodes 50 --seed-start 10000 --visual assets/basketball_shoot_stage1b_made.png
 python test_basketball_shoot.py
 ```
 
-Two fine-tuning attempts used 499,712 additional timesteps. The selected first
-attempt made 4/50 shots (8%) on seeds 10000–10049, up from 0/50 before
-fine-tuning and versus 1/50 (2%) for zero-offset replay. It completed 43/50
-shoot motions (86%), with mean release speed 3.830 m/s and mean elevation
-angle 6.57 degrees. The second continuation made 3/50 (6%), so training
-stopped and the better first checkpoint was retained.
-`assets/basketball_shoot_made.png` is a real made-shot rollout. This is a
-working physical make detector and proof of learning, but an 8% make rate is
-not portfolio-ready shooting performance.
+Stage 1b evaluated midpoint and final checkpoints from four configurations on
+held-out seeds 20000–20049 and retained the best make rate, breaking ties by
+completion and then mean closest approach. The selected 499,712-step default
+reward run made 4/50 held-out shots at its final checkpoint. On the fixed gate
+seeds 10000–10049 it made 7/50 shots (14%) and completed 44/50 motions, versus
+4/50 (8%) and 43/50 for the Stage 1 checkpoint and 1/50 (2%) and 46/50 for
+zero-offset replay. The selected policy's mean release speed was 3.517 m/s and
+mean elevation angle was 12.25 degrees.
+`assets/basketball_shoot_stage1b_made.png` is a real made-shot rollout. This is
+a measured improvement, but 14% remains below the 30–40% demo-ready target.
 
 ### Optional C++ reward
 
@@ -191,7 +192,7 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ## Roadmap
 Squat, shoot, and dunk-reach imitation are available through fixed command
 routing and a live-streaming Gradio interface. Basketball shoot has physical
-ball/rim mechanics but remains low-reliability at an 8% make rate.
+ball/rim mechanics but remains low-reliability at a 14% make rate.
 
 ## Honest limitations
 
@@ -202,8 +203,8 @@ ball/rim mechanics but remains low-reliability at an 8% make rate.
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.
-- Basketball shooting is a partial result: fine-tuning improved make rate from
-  0% to 8%, but stopped after two attempts at the 499,712-timestep budget.
+- Basketball shooting improved from 8% to 14% in Stage 1b, but remains below
+  the 30–40% demo-ready threshold after the 1,996,800-timestep budget.
 - Evaluation and the Gradio stream use PyBullet DIRECT-mode RGB rendering.
 
 ## Stack

@@ -19,13 +19,14 @@ parser.add_argument("--episodes", type=int, default=50)
 parser.add_argument("--seed-start", type=int, default=10_000)
 parser.add_argument("--visual", default="assets/basketball_shoot_made.png")
 parser.add_argument("--results-json")
+parser.add_argument("--skip-zero", action="store_true")
 args = parser.parse_args()
 
 model = PPO.load(args.model)
 
 
 def save_visual(frames, labels):
-    if not frames:
+    if not frames or not args.visual:
         return None
     path = Path(args.visual)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +48,9 @@ def evaluate(policy, capture_made=False):
     release_angles = []
     imitation_rewards = []
     minimum_distances = []
+    release_alignments = []
+    release_qualities = []
+    predicted_distances = []
     saved_frames = []
     saved_labels = []
     for episode in range(args.episodes):
@@ -76,6 +80,9 @@ def evaluate(policy, capture_made=False):
                 release_speeds.append(info["release_speed"])
                 release_angles.append(info["release_angle_degrees"])
                 minimum_distances.append(info["min_hoop_distance"])
+                release_alignments.append(info["release_alignment"])
+                release_qualities.append(info["release_quality"])
+                predicted_distances.append(info["predicted_closest_distance"])
             if capture and info["made"]:
                 saved_frames = [frame for _, frame in episode_frames]
                 saved_labels = [f"frame {frame_idx}" for frame_idx, _ in episode_frames]
@@ -89,13 +96,16 @@ def evaluate(policy, capture_made=False):
         "mean_release_angle_degrees": float(np.mean(release_angles)),
         "mean_imitation_reward": float(np.mean(imitation_rewards)),
         "mean_min_hoop_distance": float(np.mean(minimum_distances)),
+        "mean_release_alignment": float(np.mean(release_alignments)),
+        "mean_release_quality": float(np.mean(release_qualities)),
+        "mean_predicted_closest_distance": float(np.mean(predicted_distances)),
         "frames": saved_frames,
         "labels": saved_labels,
     }
 
 
 results = {}
-for policy in ("ppo", "zero"):
+for policy in ("ppo",) if args.skip_zero else ("ppo", "zero"):
     result = evaluate(policy, capture_made=policy == "ppo")
     results[policy] = result
     print(
@@ -105,13 +115,16 @@ for policy in ("ppo", "zero"):
         f"({100 * result['completed'] / result['episodes']:.1f}%), "
         f"release_speed={result['mean_release_speed']:.3f}, "
         f"release_angle={result['mean_release_angle_degrees']:.2f}deg, "
+        f"alignment={result['mean_release_alignment']:.3f}, "
+        f"predicted_distance={result['mean_predicted_closest_distance']:.3f}, "
         f"imitation_reward={result['mean_imitation_reward']:.6f}, "
         f"min_distance={result['mean_min_hoop_distance']:.3f}"
     )
 
 visual = save_visual(results["ppo"].pop("frames"), results["ppo"].pop("labels"))
-results["zero"].pop("frames")
-results["zero"].pop("labels")
+if "zero" in results:
+    results["zero"].pop("frames")
+    results["zero"].pop("labels")
 print(f"visual: {visual or 'no made PPO episode'}")
 
 if args.results_json:
