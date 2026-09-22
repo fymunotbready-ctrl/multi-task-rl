@@ -207,6 +207,37 @@ attributable to the mirrored objective rather than non-release. The 100%
 release rate and `assets/basketball_miss_rollout.png` show a normal shot motion
 that deliberately sends the ball clear of the rim.
 
+### Physics drift
+
+`VehicleEnv` is a separate PyBullet world built from the four-wheel racecar
+URDF on a flat plane. The two-value action controls steering and signed wheel
+velocity. Its 18-value observation includes world pose, linear and angular
+velocity, body-frame forward/lateral velocity, speed, slip angle, and upright
+orientation. Rear tire friction is lower than front tire friction, and steering
+applies a bounded chassis yaw torque so PPO can induce controlled oversteer.
+
+For planar speed $v$, slip angle $\beta$, and yaw rate $\omega_z$, the per-step
+reward is `min(v / 8, 1) * sin(2 * beta) - 0.05 * min(abs(omega_z) /
+(v + 0.5), 2)`, minus 0.02 below 1 m/s and 5.0 on a flip. The sine term peaks
+at 45 degrees and returns to zero at 90 degrees, so pure sideways spinning is
+not optimal.
+
+```bash
+python smoke_test_vehicle.py --steps 1000 --check-env
+python training/train_drift.py --steps 498000 --seed 409
+python eval_drift.py --model models/drift_ppo.zip --episodes 50 \
+  --seed-start 10000 --visual assets/drift_rollout.png
+python test_vehicle_env.py
+```
+
+Gate H1 passed Gymnasium validation plus 1,000 random physics steps before
+training. Two configurations used 499,712 actual timesteps each, 999,424 total.
+The selected seed-409 configuration used rear/front friction 0.3/1.2. On fixed
+seeds 10000–10049, PPO averaged 28.11 degrees of slip, a 30.41-degree mean peak,
+2.034 m/s during drift, and 50/50 safe non-flipped episodes. The seeded random
+baseline averaged 3.97 degrees, a 12.08-degree mean peak, 1.140 m/s, and 50/50
+safe episodes. `assets/drift_rollout.png` shows the selected controlled drift.
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
@@ -227,17 +258,18 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ```
 
 ## Roadmap
-Squat, shoot, dunk-reach, and intentional miss are available through fixed
-command routing and a live-streaming Gradio interface. Basketball shoot has
-physical ball/rim mechanics but remains low-reliability; Stage 1b remains the
-stronger fixed-seed shooting checkpoint at a 14% make rate.
+Squat, shoot, dunk-reach, intentional miss, and physics drift are available
+through fixed command routing and a live-streaming Gradio interface.
+Basketball shoot has physical ball/rim mechanics but remains low-reliability;
+Stage 1b remains the stronger fixed-seed shooting checkpoint at a 14% make
+rate.
 
 ## Honest limitations
 
 - All tasks are 2D, single-episode, fully observed toy physics — not
   image-based or partially observable RL.
 - "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
-- The command interface maps four fixed strings to trained behaviors; it is not
+- The command interface maps five fixed strings to trained behaviors; it is not
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.

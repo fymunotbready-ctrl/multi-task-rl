@@ -3,6 +3,7 @@ COMMAND_MAP = {
     "shoot the target": 1,
     "miss the target": 1,
     "dunk it": 2,
+    "drift": None,
 }
 
 
@@ -16,7 +17,10 @@ def resolve_command(command_text):
 
 def run_command(model, env, command_text):
     motion_idx = resolve_command(command_text)
-    observation, _ = env.reset(motion_idx=motion_idx)
+    if motion_idx is None:
+        observation, _ = env.reset()
+    else:
+        observation, _ = env.reset(motion_idx=motion_idx)
     first_frame = env.render()
     if first_frame is None:
         raise ValueError("run_command requires an environment with rgb_array rendering")

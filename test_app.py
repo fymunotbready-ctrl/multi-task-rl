@@ -22,7 +22,7 @@ class RecordingEnv:
         self.motion_idx = None
         self.steps = 0
 
-    def reset(self, motion_idx):
+    def reset(self, motion_idx=None):
         self.motion_idx = motion_idx
         self.steps = 0
         return np.zeros(1, dtype=np.float32), {}

@@ -7,12 +7,13 @@ class RecordingEnv:
     def __init__(self):
         self.motion_idx = None
 
-    def reset(self, motion_idx):
+    def reset(self, motion_idx=None):
         self.motion_idx = motion_idx
         return np.zeros(1, dtype=np.float32), {}
 
     def render(self):
-        return np.full((2, 2, 3), self.motion_idx, dtype=np.uint8)
+        value = 255 if self.motion_idx is None else self.motion_idx
+        return np.full((2, 2, 3), value, dtype=np.uint8)
 
     def step(self, action):
         return np.zeros(1, dtype=np.float32), 0.0, True, False, {}
