@@ -1,6 +1,7 @@
 COMMAND_MAP = {
     "squat down": 0,
     "shoot the target": 1,
+    "miss the target": 1,
     "dunk it": 2,
 }
 

@@ -8,12 +8,13 @@ import torch
 from stable_baselines3 import PPO
 
 from basketball_shoot import BASKETBALL_ENV_KWARGS
-from envs.ragdoll import BasketballShootEnv
+from envs.ragdoll import BasketballMissEnv, BasketballShootEnv
 
 
 torch.set_num_threads(1)
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--objective", choices=("shoot", "miss"), default="shoot")
 parser.add_argument("--model", default="models/basketball_shoot_ppo.zip")
 parser.add_argument("--episodes", type=int, default=50)
 parser.add_argument("--seed-start", type=int, default=10_000)
@@ -43,6 +44,8 @@ def save_visual(frames, labels):
 
 def evaluate(policy, capture_made=False):
     made = 0
+    released = 0
+    intentional_misses = 0
     completed = 0
     release_speeds = []
     release_angles = []
@@ -55,7 +58,12 @@ def evaluate(policy, capture_made=False):
     saved_labels = []
     for episode in range(args.episodes):
         capture = capture_made and not saved_frames
-        env = BasketballShootEnv(
+        env_class = (
+            BasketballMissEnv
+            if args.objective == "miss"
+            else BasketballShootEnv
+        )
+        env = env_class(
             render_mode="rgb_array" if capture else None,
             **BASKETBALL_ENV_KWARGS,
         )
@@ -80,6 +88,8 @@ def evaluate(policy, capture_made=False):
                     episode_frames.append((env.frame_idx, env.render()))
                 done = terminated or truncated
             made += int(info["made"])
+            released += int(info["ball_released"])
+            intentional_misses += int(info["ball_released"] and not info["made"])
             completed += int(info["completed"])
             if info["ball_released"]:
                 release_speeds.append(info["release_speed"])
@@ -88,7 +98,12 @@ def evaluate(policy, capture_made=False):
                 release_alignments.append(info["release_alignment"])
                 release_qualities.append(info["release_quality"])
                 predicted_distances.append(info["predicted_closest_distance"])
-            if capture and info["made"]:
+            evidence_outcome = (
+                info["made"]
+                if args.objective == "shoot"
+                else info["ball_released"] and not info["made"]
+            )
+            if capture and evidence_outcome:
                 saved_frames = [frame for _, frame in episode_frames]
                 saved_labels = [f"frame {frame_idx}" for frame_idx, _ in episode_frames]
         finally:
@@ -96,6 +111,8 @@ def evaluate(policy, capture_made=False):
     return {
         "made": made,
         "completed": completed,
+        "released": released,
+        "intentional_misses": intentional_misses,
         "episodes": args.episodes,
         "mean_release_speed": float(np.mean(release_speeds)),
         "mean_release_angle_degrees": float(np.mean(release_angles)),
@@ -116,6 +133,9 @@ for policy in ("ppo",) if args.skip_zero else ("ppo", "zero"):
     print(
         f"{policy}: made={result['made']}/{result['episodes']} "
         f"({100 * result['made'] / result['episodes']:.1f}%), "
+        f"intentional_misses={result['intentional_misses']}/{result['episodes']} "
+        f"({100 * result['intentional_misses'] / result['episodes']:.1f}%), "
+        f"released={result['released']}/{result['episodes']}, "
         f"completed={result['completed']}/{result['episodes']} "
         f"({100 * result['completed'] / result['episodes']:.1f}%), "
         f"release_speed={result['mean_release_speed']:.3f}, "
