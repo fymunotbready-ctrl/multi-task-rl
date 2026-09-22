@@ -135,6 +135,39 @@ python app.py
 python test_app.py
 ```
 
+### Basketball shoot mechanics
+
+`BasketballShootEnv` adds a 0.62 kg dynamic ball, a fixed physical rim, and
+downward rim-plane make detection to the shoot motion only. The ball follows
+the right wrist until the documented release at frame 65, then receives the
+measured wrist velocity and continues under PyBullet physics. A make requires
+the ball center to cross downward through the rim plane within the 0.33 m
+clearance left by the 0.45 m rim and 0.12 m ball radii.
+
+The imitation reward is still reported unchanged. A separate raw shot-outcome
+term gives 1.0 for a make or terminal partial credit from closest 3D distance
+and release alignment; training weights that term by 10. The closest-distance
+and terminal partial-credit structure comes from `AimingEnv`. The 3D wrist
+release speed, elevation angle, velocity alignment, physical rim, and
+pass-through test are new because the 2D aiming action does not map directly
+to articulated-body release velocity.
+
+```bash
+python training/train_basketball_shoot.py --steps 100000 --seed 113
+python training/train_basketball_shoot.py --input-model models/basketball_shoot_ppo.zip --output models/basketball_shoot_ppo_attempt2 --steps 398000 --seed 127
+python eval_basketball_shoot.py --episodes 50
+python test_basketball_shoot.py
+```
+
+Two fine-tuning attempts used 499,712 additional timesteps. The selected first
+attempt made 4/50 shots (8%) on seeds 10000–10049, up from 0/50 before
+fine-tuning and versus 1/50 (2%) for zero-offset replay. It completed 43/50
+shoot motions (86%), with mean release speed 3.830 m/s and mean elevation
+angle 6.57 degrees. The second continuation made 3/50 (6%), so training
+stopped and the better first checkpoint was retained.
+`assets/basketball_shoot_made.png` is a real made-shot rollout. This is a
+working physical make detector and proof of learning, but an 8% make rate is
+not portfolio-ready shooting performance.
 
 ### Optional C++ reward
 
@@ -156,9 +189,9 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ```
 
 ## Roadmap
-
 Squat, shoot, and dunk-reach imitation are available through fixed command
-routing and a live-streaming Gradio interface.
+routing and a live-streaming Gradio interface. Basketball shoot has physical
+ball/rim mechanics but remains low-reliability at an 8% make rate.
 
 ## Honest limitations
 
@@ -169,6 +202,8 @@ routing and a live-streaming Gradio interface.
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.
+- Basketball shooting is a partial result: fine-tuning improved make rate from
+  0% to 8%, but stopped after two attempts at the 499,712-timestep budget.
 - Evaluation and the Gradio stream use PyBullet DIRECT-mode RGB rendering.
 
 ## Stack
