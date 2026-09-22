@@ -9,7 +9,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 
 from basketball_shoot import BASKETBALL_ENV_KWARGS
-from envs.ragdoll import BasketballShootEnv
+from envs.ragdoll import BasketballMissEnv, BasketballShootEnv
 
 
 torch.set_num_threads(1)
@@ -127,6 +127,7 @@ class BasketballTrainingCallback(BaseCallback):
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--objective", choices=("shoot", "miss"), default="shoot")
 parser.add_argument("--steps", type=int, default=1_248_000)
 parser.add_argument("--input-model", default="models/basketball_shoot_stage1b.zip")
 parser.add_argument("--output", default="models/basketball_shoot_stage1c")
@@ -162,7 +163,8 @@ if args.release_imitation_weight_start < args.release_imitation_weight_end:
     )
 
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-env = BasketballShootEnv(
+env_class = BasketballMissEnv if args.objective == "miss" else BasketballShootEnv
+env = env_class(
     **BASKETBALL_ENV_KWARGS,
     shot_outcome_weight=args.shot_weight,
     progress_reward_scale=args.progress_scale,
@@ -187,7 +189,7 @@ callback = BasketballTrainingCallback(
     release_imitation_weight_end=args.release_imitation_weight_end,
 )
 print(
-    f"=== basketball shoot fine-tune: {args.steps} requested timesteps, "
+    f"=== basketball {args.objective} fine-tune: {args.steps} requested timesteps, "
     f"seed {args.seed}, starting at {starting_timesteps}, "
     f"shot weight {args.shot_weight}, progress {args.progress_scale}, "
     f"release quality {args.release_quality_scale}, "

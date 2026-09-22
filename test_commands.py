@@ -46,5 +46,6 @@ for command in ("jump", "shoot", ""):
     else:
         raise AssertionError(f"unknown command {command!r} was accepted")
 
-assert checks == 12
-print("OK - 12/12 command and unknown-command routing checks passed")
+expected_checks = 3 * len(COMMAND_MAP) + 3
+assert checks == expected_checks
+print(f"OK - {checks}/{expected_checks} command and unknown-command routing checks passed")

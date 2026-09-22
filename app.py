@@ -6,16 +6,18 @@ import gradio as gr
 from stable_baselines3 import PPO
 
 from commands import COMMAND_MAP, resolve_command
-from envs.ragdoll import RagdollEnv
+from basketball_shoot import BASKETBALL_ENV_KWARGS
+from envs.ragdoll import BasketballMissEnv, RagdollEnv
 from multi_motion import MOTION_ENV_KWARGS
 
 MODEL_PATH = "models/motion_conditioned_ppo.zip"
+MISS_MODEL_PATH = "models/basketball_miss_ppo.zip"
 FRAME_INTERVAL_SECONDS = 1.0 / 30.0
 
 
-@lru_cache(maxsize=1)
-def load_model():
-    return PPO.load(MODEL_PATH)
+@lru_cache(maxsize=3)
+def load_model(path=MODEL_PATH):
+    return PPO.load(path)
 
 
 def stream_rollout(model, env, command_text, frame_interval=FRAME_INTERVAL_SECONDS):
@@ -35,9 +37,18 @@ def stream_rollout(model, env, command_text, frame_interval=FRAME_INTERVAL_SECON
 
 
 def stream_command(command_text):
-    env = RagdollEnv(render_mode="rgb_array", **MOTION_ENV_KWARGS)
+    normalized = command_text.strip().lower()
+    if normalized == "miss the target":
+        env = BasketballMissEnv(
+            render_mode="rgb_array",
+            **BASKETBALL_ENV_KWARGS,
+        )
+        model_path = MISS_MODEL_PATH
+    else:
+        env = RagdollEnv(render_mode="rgb_array", **MOTION_ENV_KWARGS)
+        model_path = MODEL_PATH
     try:
-        yield from stream_rollout(load_model(), env, command_text)
+        yield from stream_rollout(load_model(model_path), env, normalized)
     finally:
         env.close()
 
@@ -49,10 +60,10 @@ def surprise_command(rng=None):
 
 def build_demo():
     with gr.Blocks(title="Ragdoll Commands") as demo:
-        gr.Markdown("# Ragdoll Commands\nEnter one of the three trained commands.")
+        gr.Markdown("# Ragdoll Commands\nEnter one of the four trained commands.")
         command = gr.Textbox(
             label="Command",
-            placeholder="squat down, shoot the target, or dunk it",
+            placeholder="squat down, shoot the target, miss the target, or dunk it",
         )
         with gr.Row():
             run = gr.Button("Run command", variant="primary")

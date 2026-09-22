@@ -125,10 +125,11 @@ commanded reference in 20/20 disturbed episodes for each motion. The three
 ### Live command interface
 
 `app.py` provides a Gradio text box, Run command button, and Surprise me
-button. It reuses the Phase 4 checkpoint without retraining. The callback is a
-generator: it advances PyBullet once and yields the newly rendered frame, so
-the browser sees the simulation as it runs rather than receiving a pre-built
-video or frame list.
+button for squat, shoot, dunk-reach, and intentional miss. It loads the
+motion-conditioned policy for the first three commands and the dedicated Miss
+checkpoint for `miss the target`. The callback is a generator: it advances
+PyBullet once and yields the newly rendered frame, so the browser sees the
+simulation as it runs rather than receiving a pre-built video or frame list.
 
 ```bash
 python app.py
@@ -177,6 +178,35 @@ is a real made-shot rollout. Stage 1c is an accepted limitation: it regressed
 from Stage 1b and remains below the 30–40% demo-ready target, so no further
 retraining is proposed within this stage.
 
+### Intentional miss
+
+`BasketballMissEnv` reuses the shoot mechanics and motion reference, but mirrors
+the sparse outcome objective: a made basket receives the negative of the shoot
+make reward, a released non-make receives +1 at episode end, and failing to
+release receives -1. With outcome weight $w$, the command-specific adjustment
+is `-2 * w * shoot_make + w * terminal_miss_outcome`. Imitation, release
+quality, and physical ball/rim dynamics are unchanged.
+
+```bash
+python training/train_basketball_shoot.py --objective miss --steps 248000 \
+  --input-model models/basketball_shoot_stage1b.zip --output models/basketball_miss_ppo
+python eval_basketball_shoot.py --objective miss \
+  --model models/basketball_miss_ppo.zip --episodes 50 --seed-start 10000 \
+  --visual assets/basketball_miss_rollout.png
+python test_basketball_miss.py
+```
+
+Two configurations used 249,856 actual timesteps each, 499,712 total, starting
+from the stronger Stage 1b weights on the Stage 1c code lineage. On held-out
+seeds 20000–20049, the selected seed-307, weight-30 final checkpoint produced
+47/50 intentional misses, released 50/50 balls, and completed 46/50 motions.
+On fixed gate seeds 10000–10049 it produced 48/50 intentional misses (96%),
+released 50/50 balls, and completed 41/50 motions. The Stage 1b shoot policy
+missed 43/50 (86%) on the same seeds, so the five-point reduction in makes is
+attributable to the mirrored objective rather than non-release. The 100%
+release rate and `assets/basketball_miss_rollout.png` show a normal shot motion
+that deliberately sends the ball clear of the rim.
+
 ### Optional C++ reward
 
 The environment automatically uses the pybind11 reward extension when it is
@@ -197,17 +227,17 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC $(python -m pybind11 --includes) \
 ```
 
 ## Roadmap
-Squat, shoot, and dunk-reach imitation are available through fixed command
-routing and a live-streaming Gradio interface. Basketball shoot has physical
-ball/rim mechanics but remains low-reliability; Stage 1b remains the stronger
-fixed-seed checkpoint at a 14% make rate.
+Squat, shoot, dunk-reach, and intentional miss are available through fixed
+command routing and a live-streaming Gradio interface. Basketball shoot has
+physical ball/rim mechanics but remains low-reliability; Stage 1b remains the
+stronger fixed-seed shooting checkpoint at a 14% make rate.
 
 ## Honest limitations
 
 - All tasks are 2D, single-episode, fully observed toy physics — not
   image-based or partially observable RL.
 - "84% on aiming" means the shared model still misses roughly 1 in 6 moving targets.
-- The command interface maps three fixed strings to trained motions; it is not
+- The command interface maps four fixed strings to trained behaviors; it is not
   open-ended language understanding.
 - Motions are hand-authored references. Dunk-reach has no airborne phase, and
   the shoot recovery gate did not beat its zero-action baseline.
