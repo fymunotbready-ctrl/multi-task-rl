@@ -8,21 +8,26 @@ from stable_baselines3 import PPO
 from commands import COMMAND_MAP, resolve_command
 from basketball_shoot import BASKETBALL_ENV_KWARGS
 from envs.ragdoll import BasketballMissEnv, RagdollEnv
+from envs.vehicle import VehicleEnv
 from multi_motion import MOTION_ENV_KWARGS
 
 MODEL_PATH = "models/motion_conditioned_ppo.zip"
 MISS_MODEL_PATH = "models/basketball_miss_ppo.zip"
+DRIFT_MODEL_PATH = "models/drift_ppo.zip"
 FRAME_INTERVAL_SECONDS = 1.0 / 30.0
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=4)
 def load_model(path=MODEL_PATH):
     return PPO.load(path)
 
 
 def stream_rollout(model, env, command_text, frame_interval=FRAME_INTERVAL_SECONDS):
     motion_idx = resolve_command(command_text)
-    observation, _ = env.reset(motion_idx=motion_idx)
+    if motion_idx is None:
+        observation, _ = env.reset()
+    else:
+        observation, _ = env.reset(motion_idx=motion_idx)
     yield env.render()
 
     done = False
@@ -44,6 +49,9 @@ def stream_command(command_text):
             **BASKETBALL_ENV_KWARGS,
         )
         model_path = MISS_MODEL_PATH
+    elif normalized == "drift":
+        env = VehicleEnv(render_mode="rgb_array")
+        model_path = DRIFT_MODEL_PATH
     else:
         env = RagdollEnv(render_mode="rgb_array", **MOTION_ENV_KWARGS)
         model_path = MODEL_PATH
@@ -60,10 +68,10 @@ def surprise_command(rng=None):
 
 def build_demo():
     with gr.Blocks(title="Ragdoll Commands") as demo:
-        gr.Markdown("# Ragdoll Commands\nEnter one of the four trained commands.")
+        gr.Markdown("# Ragdoll Commands\nEnter one of the five trained commands.")
         command = gr.Textbox(
             label="Command",
-            placeholder="squat down, shoot the target, miss the target, or dunk it",
+            placeholder="squat down, shoot the target, miss the target, dunk it, or drift",
         )
         with gr.Row():
             run = gr.Button("Run command", variant="primary")
