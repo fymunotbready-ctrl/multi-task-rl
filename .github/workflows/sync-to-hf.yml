@@ -14,11 +14,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y git-lfs
           git lfs install
-      - name: Track binary files with LFS
+      - name: Migrate existing binaries to LFS
         run: |
-          git lfs track "*.zip" "*.png" "*.pt" "*.pth" "*.gif" "*.mp4"
-          git add .gitattributes
-          git commit -m "Track binaries with Git LFS for HF Spaces" || echo "nothing to commit"
+          git lfs migrate import --everything --include="*.zip,*.png,*.pt,*.pth,*.gif,*.mp4"
       - name: Push to Hugging Face Space
         run: |
           git remote add space https://${{ vars.HF_USERNAME }}:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/${{ vars.HF_USERNAME }}/${{ vars.HF_SPACE_NAME }}
