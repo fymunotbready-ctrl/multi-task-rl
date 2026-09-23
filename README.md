@@ -1,8 +1,25 @@
+---
+title: Multi-Task RL Ragdoll Demo
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 5.49.1
+app_file: app.py
+pinned: false
+---
+
 # Multi-Task RL Portfolio
 
 One shared neural network (PPO / Stable-Baselines3) trained to solve three
 distinct 2D physics control tasks. Built entirely on a phone (Termux +
 GitHub) with free Google Colab compute. Zero budget.
+
+The public demo runs five fixed commands: `squat down`, `shoot the target`,
+`miss the target`, `dunk it`, and `drift`. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md) for copy-paste Hugging Face Spaces and local
+setup instructions, and [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md) for an
+honest non-technical overview.
 
 ## Results (held-out seeds, deterministic policy)
 
