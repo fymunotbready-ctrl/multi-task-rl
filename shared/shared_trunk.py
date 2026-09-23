@@ -43,12 +43,24 @@ class TrunkFeaturesExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, TRUNK_DIM)
         self.tasks = dict(tasks)
         self.active_task = active_task
+        self.task_names = list(self.tasks)
+        self.obs_pad = max(self.tasks.values())
+        self.joint_dim = self.obs_pad + len(self.tasks)
         self.proj = nn.ModuleDict({
             name: nn.Linear(dim, TRUNK_DIM) for name, dim in self.tasks.items()
         })
         self.trunk = SharedTrunk()
 
     def forward(self, obs):
+        if obs.shape[-1] == self.joint_dim:
+            task_ids = obs[:, self.obs_pad:].argmax(dim=1)
+            out = obs.new_zeros((obs.shape[0], TRUNK_DIM))
+            for idx, name in enumerate(self.task_names):
+                mask = task_ids == idx
+                if mask.any():
+                    task_obs = obs[mask, :self.tasks[name]]
+                    out[mask] = self.trunk(torch.tanh(self.proj[name](task_obs)))
+            return out
         z = torch.tanh(self.proj[self.active_task](obs))
         return self.trunk(z)
 
@@ -72,5 +84,5 @@ def save_trunk(model, path: str):
 
 
 def load_trunk(model, path: str):
-    sd = torch.load(path, map_location=model.device)
+    sd = torch.load(path, map_location=model.device, weights_only=True)
     model.policy.features_extractor.load_state_dict(sd, strict=True)

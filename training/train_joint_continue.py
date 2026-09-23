@@ -1,7 +1,10 @@
 import sys, os, csv
 sys.path.insert(0, ".")
+import torch
+torch.set_num_threads(1)
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.policies import ActorCriticPolicy
 from envs.meta_env import MultiTaskEnv, TASK_NAMES
 from envs.basketball.basketball_env import BasketballEnv
 from envs.driving.driving_env import DrivingEnv
@@ -36,6 +39,8 @@ class JointCallback(BaseCallback):
         self.window, self.best, self._last_eval = [], -1.0, 0
         with open("logs/joint_train_v2.csv", "w", newline="") as f:
             csv.writer(f).writerow(["steps", "task", "ep_rew_mean", "success"])
+        with open("logs/joint_eval_v2.csv", "w", newline="") as f:
+            csv.writer(f).writerow(["steps"] + TASK_NAMES + ["mean"])
 
     def _on_step(self):
         for info in self.locals.get("infos", []):
@@ -72,7 +77,11 @@ class JointCallback(BaseCallback):
 
 
 env = MultiTaskEnv()
-model = PPO.load("models/joint_trunk_best.zip", env=env)
+model = PPO.load(
+    "models/joint_trunk_best.zip",
+    env=env,
+    custom_objects={"policy_class": ActorCriticPolicy, "clip_range": 0.2},
+)
 model.set_env(env)
 model.verbose = 1
 model.learning_rate = 3e-4
